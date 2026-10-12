@@ -20,6 +20,12 @@ targets:
         UIBackgroundModes:
           - audio
         NSMicrophoneUsageDescription: 用于会议录音与实时转写
+        # iOS 默认禁止明文 ws://(ATS)。我们的转写服务在 xEdge 私网里、没有 TLS 证书,
+        # 所以这里放开:自签自用的 App,不上架,风险面就是"家里私网这一条链路"。
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: 连接你家里的转写服务(xEdge 私网)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.luanshijia.meetingvoice
