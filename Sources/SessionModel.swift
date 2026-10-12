@@ -46,8 +46,8 @@ final class SessionModel: ObservableObject {
         ws.onTick = { [weak self] secs, _ in
             Task { @MainActor in self?.serverSeconds = secs }
         }
-        ws.onReconnect = { [weak self] n in
-            Task { @MainActor in self?.reconnectCount = n }
+        ws.onReconnect = { [weak self] in
+            Task { @MainActor in self?.reconnectCount += 1 }
         }
         ws.onNote = { note in CrashLog.step(note) }
         capture.onNote = { note in CrashLog.step(note) }
@@ -78,6 +78,12 @@ final class SessionModel: ObservableObject {
     func resetServerURL() { serverURL = "wss://100.64.0.2:8790/stream" }
 
     func clearCrashNote() { CrashLog.clear() }
+
+    /// 回到前台时叫一次:立刻验活,不等下一个心跳
+    func verifyConnectionNow() {
+        guard isRecording else { return }
+        ws.verifyNow()
+    }
 
     private func start() {
         guard let url = URL(string: serverURL), url.scheme == "wss" || url.scheme == "ws" else {

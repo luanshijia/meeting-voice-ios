@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var model = SessionModel()
     @State private var showSettings = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(spacing: 8) {
@@ -86,6 +87,9 @@ struct ContentView: View {
         .padding(.horizontal, 14)
         .padding(.bottom, 8)
         .sheet(isPresented: $showSettings) { SettingsSheet(model: model) }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { model.verifyConnectionNow() }
+        }
     }
 
     private func metric(_ label: String, _ value: Double, _ color: Color) -> some View {
@@ -167,7 +171,7 @@ struct SettingsSheet: View {
 
     private var versionSection: some View {
         Section {
-            Text("v0.1.4 · build 9 · wss + 自家 CA")
+            Text("v0.1.5 · build 10 · wss + 自家 CA + 心跳看门狗")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
