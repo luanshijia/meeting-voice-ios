@@ -7,7 +7,12 @@ import Foundation
 ///  2) 发送串行化(同一时刻只有一个 send 在飞),排队上限 25 帧。
 final class WSClient: NSObject {
     private var task: URLSessionWebSocketTask?
-    private lazy var session: URLSession = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+    private lazy var session: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        // 显式给 User-Agent,免得 CFNetwork 走"自己拼 UA"那条路
+        cfg.httpAdditionalHeaders = ["User-Agent": "MeetingVoice/0.1.2"]
+        return URLSession(configuration: cfg, delegate: self, delegateQueue: nil)
+    }()
 
     private let sendQueue = DispatchQueue(label: "meetingvoice.ws.send")
     private var backlog: [Data] = []

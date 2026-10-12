@@ -92,7 +92,7 @@ struct ContentView: View {
             .padding()
             .navigationTitle("MeetingVoice")
             .overlay(alignment: .bottom) {
-                Text("v0.1.2 · build 6 · wss + 自家 CA")
+                Text("v0.1.2 · build 7 · wss + 自家 CA")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
