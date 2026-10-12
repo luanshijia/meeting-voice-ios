@@ -64,10 +64,14 @@ enum CrashLog {
         gStepBuf = buf
 
         // 1) ObjC 异常(AVAudioEngine 断言、数组越界等走这条)
+        // C 函数指针里不能访问静态成员(会被算成"捕获上下文"),所以这里只用字面量和局部变量
         NSSetUncaughtExceptionHandler { exc in
-            let info = "\(stamp()) NSException \(exc.name.rawValue)\n原因: \(exc.reason ?? "-")\n"
+            let fmt = DateFormatter()
+            fmt.dateFormat = "MM-dd HH:mm:ss"
+            let info = fmt.string(from: Date()) + " NSException \(exc.name.rawValue)\n原因: "
+                + (exc.reason ?? "-") + "\n"
                 + exc.callStackSymbols.prefix(20).joined(separator: "\n")
-            UserDefaults.standard.set(info, forKey: failureKey)
+            UserDefaults.standard.set(info, forKey: "mv.lastFailure")
             UserDefaults.standard.synchronize()
         }
 
