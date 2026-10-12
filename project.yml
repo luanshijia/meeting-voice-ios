@@ -5,11 +5,14 @@ options:
     iOS: "17.0"
   createIntermediateGroups: true
 
-# 用官方预编译包(而非源码包):官方称其为"更快的 CI 构建"而准备。
-# 代价:CI 每次要拉 262.6 MB(实测 release 体积),换来的是不在 CI 里现编 WebRTC。
+# 用官方「源码包」而不是「预编译包」:预编译包声明 swift-tools-version:6.2,
+# 需要 Xcode 26;CI 的 macos-15 runner 是 Xcode 16.4(只到 Swift 6.1),会被解析器直接拒绝
+# (实测报错:Dependencies could not be resolved because ... incompatible tools version (6.2.0))。
+# 源码包声明 swift-tools-version:6.1(包内注释写明 "Xcode16.3+"),当前 runner 可用。
+# 代价:CI 里要现编 SDK(慢一些);换来的是不依赖 Xcode 26。
 packages:
   LiveKit:
-    url: https://github.com/livekit/client-sdk-swift-xcframework
+    url: https://github.com/livekit/client-sdk-swift
     from: "2.17.0"
 
 targets:
