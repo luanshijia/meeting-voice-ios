@@ -15,7 +15,8 @@ targets:
       path: Support/Info.plist
       properties:
         CFBundleDisplayName: MeetingVoice
-        CFBundleVersion: 3
+        CFBundleShortVersionString: 0.1.0
+        CFBundleVersion: 4
         UILaunchScreen: {}
         # 锁屏/后台继续录音的关键:后台音频模式
         UIBackgroundModes:
