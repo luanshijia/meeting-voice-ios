@@ -17,8 +17,8 @@ targets:
         CFBundleDisplayName: MeetingVoice
         # 必须写成带引号的字符串:YAML 会把 6 当数字,CFNetwork 拼 User-Agent 时
         # 拿到数字会抛异常直接 abort(实测崩溃栈:initializeUserAgentString)
-        CFBundleShortVersionString: "0.1.2"
-        CFBundleVersion: "7"
+        CFBundleShortVersionString: "0.1.3"
+        CFBundleVersion: "8"
         UILaunchScreen: {}
         # 锁屏/后台继续录音的关键:后台音频模式
         UIBackgroundModes:

@@ -38,10 +38,14 @@ struct ContentView: View {
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
-                    Text(model.audioSeconds > 0 ? String(format: "%.0fs", model.audioSeconds) : "—")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 44, alignment: .trailing)
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text(model.audioSeconds > 0 ? String(format: "录 %.0fs", model.audioSeconds) : "—")
+                            .font(.footnote)
+                        Text(model.uploadedSeconds > 0 ? String(format: "传 %.0fs", model.uploadedSeconds) : "")
+                            .font(.caption2)
+                            .foregroundStyle(model.uploadedSeconds + 3 < model.audioSeconds ? .red : .secondary)
+                    }
+                    .frame(width: 64, alignment: .trailing)
                 }
 
                 Button {
@@ -54,6 +58,13 @@ struct ContentView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(model.isRecording ? .red : .accentColor)
+
+                if model.reconnectCount > 0 {
+                    Text("本次已断线重连 \(model.reconnectCount) 次(音频已续传,可能分成多个文件)")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
                 Text(model.status)
                     .font(.caption)
@@ -92,7 +103,7 @@ struct ContentView: View {
             .padding()
             .navigationTitle("MeetingVoice")
             .overlay(alignment: .bottom) {
-                Text("v0.1.2 · build 7 · wss + 自家 CA")
+                Text("v0.1.3 · build 8 · wss + 自家 CA")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

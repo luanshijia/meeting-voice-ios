@@ -1,6 +1,7 @@
 import Foundation
 
 /// 把「采集 → 推流 → 回传文本」串起来。实时阶段只出文字,不分说话人。
+/// build 8 起:断线自动重连,并且界面区分「已录」与「已传」——再也不拿"录音中"骗人。
 @MainActor
 final class SessionModel: ObservableObject {
     @Published var serverURL: String {
@@ -10,12 +11,11 @@ final class SessionModel: ObservableObject {
     @Published var status = "未连接"
     @Published var lines: [String] = []
     @Published var partial = ""
-    @Published var audioSeconds: Double = 0
-    /// 上一次崩溃的正文(信号/异常)
+    @Published var audioSeconds: Double = 0        // 本地已录
+    @Published var uploadedSeconds: Double = 0     // 真的传出去了
+    @Published var reconnectCount = 0
     @Published var crashNote: String?
-    /// 崩溃前最后 30 步流水
     @Published var stepNote: String?
-    /// 崩溃前计数
     @Published var counterNote: String?
 
     private let capture = AudioCapture()
@@ -48,8 +48,12 @@ final class SessionModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.sentFrames += n
+                self.uploadedSeconds = Double(self.sentFrames) / 10.0    // 每帧约 0.1 秒音频
                 self.refreshCounters()
             }
+        }
+        ws.onReconnect = { [weak self] n in
+            Task { @MainActor in self?.reconnectCount = n }
         }
         ws.onNote = { note in CrashLog.step(note) }
         capture.onNote = { note in CrashLog.step(note) }
@@ -61,8 +65,8 @@ final class SessionModel: ObservableObject {
                 self.captureBlocks += 1
                 self.totalBytes += n
                 self.audioSeconds = Double(self.totalBytes) / 2 / 16000
-                if self.captureBlocks % 50 == 0 {          // 约每 5 秒记一次心跳
-                    CrashLog.step("心跳: 已录 \(Int(self.audioSeconds))s, 发出 \(self.sentFrames) 帧, 收到 \(self.receivedMsgs) 条")
+                if self.captureBlocks % 50 == 0 {
+                    CrashLog.step("心跳: 已录 \(Int(self.audioSeconds))s, 已传 \(Int(self.uploadedSeconds))s, 收到 \(self.receivedMsgs) 条, 重连 \(self.reconnectCount) 次")
                 }
                 self.refreshCounters()
             }
@@ -82,13 +86,15 @@ final class SessionModel: ObservableObject {
         partial = ""
         totalBytes = 0
         audioSeconds = 0
+        uploadedSeconds = 0
         receivedMsgs = 0
         partials = 0
         sentFrames = 0
         captureBlocks = 0
+        reconnectCount = 0
         CrashLog.markRunStart()
         CrashLog.step("点了开始: 地址有效, 准备连接")
-        ws.connect(url)
+        ws.start(url)
         do {
             try capture.start()
             isRecording = true
@@ -96,15 +102,16 @@ final class SessionModel: ObservableObject {
         } catch {
             status = "启动录音失败:\(error.localizedDescription)"
             CrashLog.step("采集启动失败:\(error.localizedDescription)")
-            ws.disconnect()
+            ws.stop()
         }
     }
 
     private func stop() {
         capture.stop()
         ws.sendControl(["type": "stop"])
+        ws.stop()
         isRecording = false
-        status = "已停止,等服务端归档"
+        status = "已停止(你在 \(Int(audioSeconds)) 秒里传出了 \(Int(uploadedSeconds)) 秒)"
         CrashLog.step("用户点了停止")
         CrashLog.markRunEnd()
     }
@@ -131,7 +138,6 @@ final class SessionModel: ObservableObject {
         case "final":
             if let t = obj["text"] as? String, !t.isEmpty { lines.append(t) }
             partial = ""
-            CrashLog.step("收到 final(累计 \(lines.count) 段)")
         case "bye":
             if let t = obj["text"] as? String, !t.isEmpty { lines.append(t) }
             partial = ""
@@ -140,7 +146,6 @@ final class SessionModel: ObservableObject {
             CrashLog.markRunEnd()
         case "error":
             status = "服务端错误:" + ((obj["message"] as? String) ?? "")
-            CrashLog.step("服务端返回错误")
         default:
             break
         }
