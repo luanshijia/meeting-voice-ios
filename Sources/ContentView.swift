@@ -108,35 +108,11 @@ struct SettingsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("服务器地址") {
-                    TextField("wss://100.64.0.2:8790/stream", text: $model.serverURL)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.URL)
-                        .font(.system(size: 15, design: .monospaced))
-                    Button("恢复默认地址") { model.resetServerURL() }
-                }
-
-                if let crash = CrashLog.previousCrashFile ?? CrashLog.lastFailure {
-                    Section("上次异常(黑匣子)") {
-                        Text(crash).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
-                        Button("清空") { model.clearCrashNote() }
-                    }
-                }
-                if let steps = CrashLog.previousSteps {
-                    Section("崩溃前最近步骤") {
-                        Text(steps).font(.system(size: 10, design: .monospaced)).textSelection(.enabled)
-                    }
-                }
-                if let counters = CrashLog.counters {
-                    Section("计数") {
-                        Text(counters).font(.system(size: 11, design: .monospaced))
-                    }
-                }
-                Section {
-                    Text("v0.1.4 · build 9 · wss + 自家 CA")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
+                serverSection
+                crashSection
+                stepsSection
+                countersSection
+                versionSection
             }
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
@@ -145,6 +121,55 @@ struct SettingsSheet: View {
                     Button("完成") { dismiss() }
                 }
             }
+        }
+    }
+
+    private var serverSection: some View {
+        Section("服务器地址") {
+            TextField("wss://100.64.0.2:8790/stream", text: $model.serverURL)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .keyboardType(.URL)
+                .font(.system(size: 15, design: .monospaced))
+            Button("恢复默认地址") { model.resetServerURL() }
+        }
+    }
+
+    @ViewBuilder private var crashSection: some View {
+        if let crash = CrashLog.previousCrashFile {
+            Section("上次异常(黑匣子文件)") {
+                Text(crash).font(.system(size: 11, design: .monospaced))
+                Button("清空黑匣子") { model.clearCrashNote() }
+            }
+        } else if let failed = CrashLog.lastFailure {
+            Section("上次异常") {
+                Text(failed).font(.system(size: 11, design: .monospaced))
+                Button("清空黑匣子") { model.clearCrashNote() }
+            }
+        }
+    }
+
+    @ViewBuilder private var stepsSection: some View {
+        if let steps = CrashLog.previousSteps, !steps.isEmpty {
+            Section("最近步骤") {
+                Text(steps).font(.system(size: 10, design: .monospaced))
+            }
+        }
+    }
+
+    @ViewBuilder private var countersSection: some View {
+        if !model.countersText.isEmpty {
+            Section("计数") {
+                Text(model.countersText).font(.system(size: 11, design: .monospaced))
+            }
+        }
+    }
+
+    private var versionSection: some View {
+        Section {
+            Text("v0.1.4 · build 9 · wss + 自家 CA")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 }
