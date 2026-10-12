@@ -1,0 +1,14 @@
+# XcodeGen 生成物(由 CI 每次重新生成,不入库)
+*.xcodeproj/
+*.xcworkspace/
+
+# 构建产物
+build/
+DerivedData/
+*.xcarchive
+*.ipa
+
+# macOS / Xcode 杂项
+.DS_Store
+xcuserdata/
+*.xcuserstate

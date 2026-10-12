@@ -1,0 +1,65 @@
+name: build-ipa
+
+# 在云端 macOS 上生成 Xcode 工程 → 编译 → 产出未签名 .ipa
+# 未签名即可:签名由手机上的 SideStore 用你的免费 Apple ID 完成。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 工具链版本
+        run: |
+          sw_vers
+          xcodebuild -version
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        run: |
+          xcodegen --version
+          xcodegen generate
+          ls -la
+
+      - name: 编译(不签名)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project MeetingVoice.xcodeproj \
+            -scheme MeetingVoice \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/MeetingVoice.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            archive
+
+      - name: 打包成未签名 .ipa
+        run: |
+          set -eux
+          APP="$RUNNER_TEMP/MeetingVoice.xcarchive/Products/Applications/MeetingVoice.app"
+          test -d "$APP"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/"
+          cd "$RUNNER_TEMP/ipa"
+          zip -qry MeetingVoice-unsigned.ipa Payload
+          ls -la MeetingVoice-unsigned.ipa
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: MeetingVoice-unsigned-ipa
+          path: ${{ runner.temp }}/ipa/MeetingVoice-unsigned.ipa
+          if-no-files-found: error
