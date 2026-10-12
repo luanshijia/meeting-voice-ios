@@ -11,6 +11,15 @@ targets:
     platform: iOS
     sources:
       - Sources
+    info:
+      path: Support/Info.plist
+      properties:
+        CFBundleDisplayName: MeetingVoice
+        UILaunchScreen: {}
+        # 锁屏/后台继续录音的关键:后台音频模式
+        UIBackgroundModes:
+          - audio
+        NSMicrophoneUsageDescription: 用于会议录音与实时转写
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.luanshijia.meetingvoice
@@ -19,11 +28,7 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: MeetingVoice
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: 用于会议录音与实时转写
-        INFOPLIST_KEY_UIBackgroundModes: audio
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        GENERATE_INFOPLIST_FILE: NO
         # 纯验证 CI 出包通路:不签名
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGN_IDENTITY: ""
