@@ -11,10 +11,12 @@ final class SessionModel: ObservableObject {
     @Published var lines: [String] = []
     @Published var partial = ""
     @Published var audioSeconds: Double = 0
-    /// 上一次崩溃的原因(有就显示在界面顶部,省得去翻系统日志)
+    /// 上一次崩溃的正文(信号/异常)
     @Published var crashNote: String?
-    /// 上一次没正常收尾的提示
-    @Published var lastRunNote: String?
+    /// 崩溃前最后 30 步流水
+    @Published var stepNote: String?
+    /// 崩溃前计数
+    @Published var counterNote: String?
 
     private let capture = AudioCapture()
     private let ws = WSClient()
@@ -26,9 +28,13 @@ final class SessionModel: ObservableObject {
 
     init() {
         serverURL = UserDefaults.standard.string(forKey: "serverURL") ?? "wss://100.64.0.2:8790/stream"
-        crashNote = CrashLog.previousCrashFile ?? CrashLog.lastFailure
-        if crashNote == nil, let started = CrashLog.previousRunStartedAt {
-            lastRunNote = "上次运行(\(started))没正常收尾 · 最后一步:\(CrashLog.lastStep ?? "无记录")"
+
+        CrashLog.readPreviousRun()
+        crashNote = CrashLog.previousCrashFile ?? CrashLog.previousFailure
+        stepNote = CrashLog.previousSteps
+        counterNote = CrashLog.counters
+        if crashNote == nil, stepNote == nil, CrashLog.previousRunStartedAt != nil {
+            stepNote = "上次运行(\(CrashLog.previousRunStartedAt ?? "?"))没正常收尾"
         }
 
         let ws = self.ws
@@ -42,18 +48,22 @@ final class SessionModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.sentFrames += n
-                if self.sentFrames % 100 == 0 { CrashLog.step("已成功发出 \(self.sentFrames) 帧音频") }
                 self.refreshCounters()
             }
         }
+        ws.onNote = { note in CrashLog.step(note) }
+        capture.onNote = { note in CrashLog.step(note) }
         capture.onChunk = { [weak self] data in
             guard let self else { return }
-            ws.sendAudio(data)          // ws 不是 MainActor,后台线程调用安全
+            ws.sendAudio(data)
             let n = data.count
             Task { @MainActor in
                 self.captureBlocks += 1
                 self.totalBytes += n
                 self.audioSeconds = Double(self.totalBytes) / 2 / 16000
+                if self.captureBlocks % 50 == 0 {          // 约每 5 秒记一次心跳
+                    CrashLog.step("心跳: 已录 \(Int(self.audioSeconds))s, 发出 \(self.sentFrames) 帧, 收到 \(self.receivedMsgs) 条")
+                }
                 self.refreshCounters()
             }
         }
@@ -76,13 +86,13 @@ final class SessionModel: ObservableObject {
         partials = 0
         sentFrames = 0
         captureBlocks = 0
-        CrashLog.step("点了开始:地址有效,准备连接")
+        CrashLog.markRunStart()
+        CrashLog.step("点了开始: 地址有效, 准备连接")
         ws.connect(url)
         do {
             try capture.start()
             isRecording = true
             status = "录音中(等服务器就绪…)"
-            CrashLog.step("采集已启动,等服务器 ready")
         } catch {
             status = "启动录音失败:\(error.localizedDescription)"
             CrashLog.step("采集启动失败:\(error.localizedDescription)")
@@ -105,8 +115,8 @@ final class SessionModel: ObservableObject {
 
     private func handle(_ raw: String) {
         receivedMsgs += 1
-        if receivedMsgs <= 3 || receivedMsgs % 50 == 0 {
-            CrashLog.step("收到第 \(receivedMsgs) 条消息: \(raw.prefix(40))")
+        if receivedMsgs <= 5 || receivedMsgs % 50 == 0 {
+            CrashLog.step("收到第 \(receivedMsgs) 条: \(raw.prefix(30))")
         }
         guard let data = raw.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -118,7 +128,6 @@ final class SessionModel: ObservableObject {
         case "partial":
             partials += 1
             partial = (obj["text"] as? String) ?? ""
-            if partials == 1 { CrashLog.step("收到第 1 条 partial") }
         case "final":
             if let t = obj["text"] as? String, !t.isEmpty { lines.append(t) }
             partial = ""
@@ -141,6 +150,7 @@ final class SessionModel: ObservableObject {
     func clearCrashNote() {
         CrashLog.clear()
         crashNote = nil
-        lastRunNote = nil
+        stepNote = nil
+        counterNote = nil
     }
 }

@@ -1,35 +1,35 @@
 import SwiftUI
 
 /// 站 2 的界面:服务器地址 + 开始/停止 + 滚动字幕。
-/// 实时阶段只出文字(不分说话人);会后纪要由家里那侧另跑。
+/// 顶部那块是"黑匣子":有崩溃就显示崩因 + 崩溃前最后 30 步流水。
 struct ContentView: View {
     @StateObject private var model = SessionModel()
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 10) {
-                if let crash = model.crashNote {
+                if model.crashNote != nil || model.stepNote != nil {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("上次崩溃的原因(黑匣子)")
-                            .font(.caption).bold()
-                        Text(crash)
-                            .font(.system(size: 11, design: .monospaced))
-                            .textSelection(.enabled)
-                        if let c = CrashLog.counters {
-                            Text("崩溃前计数:" + c).font(.system(size: 11, design: .monospaced))
+                        HStack {
+                            Text("上次异常(黑匣子)").font(.caption).bold()
+                            Spacer()
+                            Button("清空") { model.clearCrashNote() }.font(.caption)
                         }
-                        Button("清空这条") { model.clearCrashNote() }
-                            .font(.caption)
+                        if let c = model.crashNote {
+                            Text(c).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+                        }
+                        if let s = model.stepNote {
+                            Text("最近步骤:").font(.caption2).foregroundStyle(.secondary)
+                            Text(s).font(.system(size: 10, design: .monospaced)).textSelection(.enabled)
+                        }
+                        if let n = model.counterNote {
+                            Text("计数:" + n).font(.system(size: 10, design: .monospaced))
+                        }
                     }
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.red.opacity(0.12))
                     .cornerRadius(8)
-                } else if let note = model.lastRunNote {
-                    Text(note)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.orange)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 HStack(spacing: 8) {
@@ -79,7 +79,6 @@ struct ContentView: View {
                         }
                         .padding(.vertical, 2)
                     }
-                    // 不再每一帧都带动画滚动(20 次/秒的动画滚动是崩溃隐患),改成安安静静跟到底
                     .onChange(of: model.partial) { _, newValue in
                         guard !newValue.isEmpty else { return }
                         proxy.scrollTo("partial", anchor: .bottom)
@@ -93,7 +92,7 @@ struct ContentView: View {
             .padding()
             .navigationTitle("MeetingVoice")
             .overlay(alignment: .bottom) {
-                Text("v0.1.1 · build 5 · wss + 自家 CA")
+                Text("v0.1.2 · build 6 · wss + 自家 CA")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

@@ -1,35 +1,45 @@
 import Foundation
 
-// 信号处理里不能用 UserDefaults(不是异步信号安全的),所以用全局的 fd 和一块字符缓冲
+// 信号处理里不能用 UserDefaults(不是异步信号安全的),所以用全局 fd 和一块字符缓冲
 private var gLogFD: Int32 = -1
 private var gStepBuf: UnsafeMutablePointer<CChar>?
+private var gLastLine = ""
 
-/// 黑匣子:侧载 App 想翻系统崩溃日志很麻烦,这里自己记下
-/// 「上一次崩溃的原因 + 最后一步进度」,下次打开 App 直接显示在界面顶部。
+/// 黑匣子 v2:除了崩溃原因,还保留最近 30 步流水,便于还原"崩之前发生了什么"。
 enum CrashLog {
     private static let failureKey = "mv.lastFailure"
-    private static let stepKey = "mv.lastStep"
+    private static let stepsKey = "mv.steps"
     private static let runKey = "mv.runStartedAt"
     private static let countersKey = "mv.counters"
+    private static let maxSteps = 30
 
     private(set) static var previousRunStartedAt: String?
     private(set) static var previousCrashFile: String?
+    private(set) static var previousSteps: String?
+    private(set) static var previousFailure: String?
 
     static var lastFailure: String? { UserDefaults.standard.string(forKey: failureKey) }
-    static var lastStep: String? { UserDefaults.standard.string(forKey: stepKey) }
     static var counters: String? { UserDefaults.standard.string(forKey: countersKey) }
 
+    private static var steps: [String] = []
+
     static func clear() {
-        [failureKey, stepKey, runKey, countersKey].forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        [failureKey, stepsKey, runKey, countersKey].forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        steps.removeAll()
         previousCrashFile = nil
+        previousFailure = nil
+        previousSteps = nil
         previousRunStartedAt = nil
         if gLogFD >= 0 { ftruncate(gLogFD, 0) }
     }
 
-    /// 记一步进度:崩了以后能看出最后停在哪
+    /// 记一步进度(环形缓冲,只留最近 30 步)
     static func step(_ text: String) {
         let line = "\(stamp()) \(text)"
-        UserDefaults.standard.set(line, forKey: stepKey)
+        steps.append(line)
+        if steps.count > maxSteps { steps.removeFirst(steps.count - maxSteps) }
+        UserDefaults.standard.set(steps.joined(separator: "\n"), forKey: stepsKey)
+        // 同步到信号处理能读的那块内存(最后一行)
         if let buf = gStepBuf {
             line.withCString { cs in
                 let n = min(strlen(cs), 500)
@@ -44,12 +54,19 @@ enum CrashLog {
                                   forKey: countersKey)
     }
 
-    static func markRunStart() { UserDefaults.standard.set(stamp(), forKey: runKey) }
+    static func markRunStart() {
+        UserDefaults.standard.set(stamp(), forKey: runKey)
+        steps.removeAll()
+        UserDefaults.standard.removeObject(forKey: stepsKey)
+    }
+
     static func markRunEnd() { UserDefaults.standard.removeObject(forKey: runKey) }
 
-    /// 启动时最先调用:先读上一轮留下的痕迹(读文件必须在 install() 清空之前)
+    /// 启动时最先调用:读上一轮留下的痕迹(必须在 install() 清空文件之前)
     static func readPreviousRun() {
         previousRunStartedAt = UserDefaults.standard.string(forKey: runKey)
+        previousSteps = UserDefaults.standard.string(forKey: stepsKey)
+        previousFailure = UserDefaults.standard.string(forKey: failureKey)
         if let s = try? String(contentsOf: logFileURL, encoding: .utf8),
            !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             previousCrashFile = s
@@ -63,7 +80,6 @@ enum CrashLog {
         buf.initialize(repeating: 0, count: 512)
         gStepBuf = buf
 
-        // 1) ObjC 异常(AVAudioEngine 断言、数组越界等走这条)
         // C 函数指针里不能访问静态成员(会被算成"捕获上下文"),所以这里只用字面量和局部变量
         NSSetUncaughtExceptionHandler { exc in
             let fmt = DateFormatter()
@@ -75,7 +91,6 @@ enum CrashLog {
             UserDefaults.standard.synchronize()
         }
 
-        // 2) 信号(Swift 里最常见的崩溃走这条)
         for sig in [SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP] {
             signal(sig) { s in
                 if gLogFD >= 0 {

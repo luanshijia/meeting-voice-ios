@@ -1,9 +1,10 @@
 import Foundation
 
 /// 极薄的 WebSocket 客户端:音频走二进制帧,控制/结果走文本帧(JSON)。
-///
-/// 发送串行化:同一时刻只允许一个 send 在飞,后面的排队(囤太多就丢最旧的)。
-/// 之前是「20 帧/秒直接并发 send」,这是真实的崩溃隐患。
+/// 两条实测得来的规矩:
+///  1) 只有**握手真的完成**后才发音频(之前在没有完成的情况下一直 send,
+///     实测出现"采集 34 秒、发出 0 帧"且随后 SIGABRT);
+///  2) 发送串行化(同一时刻只有一个 send 在飞),排队上限 25 帧。
 final class WSClient: NSObject {
     private var task: URLSessionWebSocketTask?
     private lazy var session: URLSession = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
@@ -11,32 +12,49 @@ final class WSClient: NSObject {
     private let sendQueue = DispatchQueue(label: "meetingvoice.ws.send")
     private var backlog: [Data] = []
     private var sending = false
-    private let maxBacklog = 25            // 最多囤约 2.5 秒,再多丢最旧的,不让内存无限涨
+    private var opened = false
+    private let maxBacklog = 25
+    private var droppedWhileClosed = 0
 
     var onText: ((String) -> Void)?
     var onState: ((String) -> Void)?
-    var onSent: ((Int) -> Void)?           // 成功发出的帧数(诊断用)
+    var onSent: ((Int) -> Void)?
+    var onNote: ((String) -> Void)?          // 给黑匣子记流水用
 
     var isOpen: Bool { task != nil }
+    var handshakeDone: Bool { opened }
 
     func connect(_ url: URL) {
         disconnect()
         let t = session.webSocketTask(with: url)
         task = t
         t.resume()
-        onState?("连接中…\(url.host ?? "")")   // 说真话:这只是"发起",握手还没完成
+        onState?("连接中…\(url.host ?? "")")
+        onNote?("已发起 wss 连接(等握手)")
         listen()
     }
 
     func disconnect() {
-        sendQueue.sync { backlog.removeAll() }
+        sendQueue.sync {
+            backlog.removeAll()
+            sending = false
+            opened = false
+        }
         task?.cancel(with: .normalClosure, reason: nil)
         task = nil
     }
 
+    /// 握手没完成就直接丢,不往 URLSession 里塞
     func sendAudio(_ data: Data) {
         sendQueue.async { [weak self] in
             guard let self else { return }
+            guard self.opened else {
+                self.droppedWhileClosed += 1
+                if self.droppedWhileClosed % 100 == 1 {
+                    self.onNote?("握手未完成,已丢弃 \(self.droppedWhileClosed) 块音频")
+                }
+                return
+            }
             if self.backlog.count >= self.maxBacklog { self.backlog.removeFirst() }
             self.backlog.append(data)
             self.pumpLocked()
@@ -51,14 +69,18 @@ final class WSClient: NSObject {
 
     /// 只在 sendQueue 上调用
     private func pumpLocked() {
-        guard !sending, let t = task, !backlog.isEmpty else { return }
+        guard opened, !sending, let t = task, !backlog.isEmpty else { return }
         let d = backlog.removeFirst()
         sending = true
         t.send(.data(d)) { [weak self] err in
             guard let self else { return }
             self.sendQueue.async {
                 self.sending = false
-                if err == nil { self.onSent?(1) }
+                if let err {
+                    self.onNote?("发送失败:\(err.localizedDescription)")
+                } else {
+                    self.onSent?(1)
+                }
                 self.pumpLocked()
             }
         }
@@ -70,6 +92,7 @@ final class WSClient: NSObject {
             switch result {
             case .failure(let err):
                 self.onState?("连接中断:\(err.localizedDescription)")
+                self.onNote?("接收失败:\(err.localizedDescription)")
                 self.task = nil
             case .success(let msg):
                 switch msg {
@@ -87,11 +110,17 @@ final class WSClient: NSObject {
 }
 
 extension WSClient: URLSessionWebSocketDelegate {
-    /// 握手真的完成了才有这条 —— 之前那句"已连接"是假的,现在分开了
+    /// 握手真的完成了 —— 从这一刻起才允许发音频
     func urlSession(_ session: URLSession,
                     webSocketTask: URLSessionWebSocketTask,
                     didOpenWithProtocol proto: String?) {
+        sendQueue.async { [weak self] in
+            guard let self else { return }
+            self.opened = true
+            self.pumpLocked()
+        }
         onState?("握手完成(等待服务端就绪)")
+        onNote?("握手完成,子协议=\(proto ?? "无")")
     }
 
     func urlSession(_ session: URLSession,
@@ -99,6 +128,8 @@ extension WSClient: URLSessionWebSocketDelegate {
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
                     reason: Data?) {
         onState?("连接已关闭(\(closeCode.rawValue))")
+        onNote?("连接关闭,code=\(closeCode.rawValue)")
+        sendQueue.async { [weak self] in self?.opened = false }
         task = nil
     }
 }
