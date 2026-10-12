@@ -16,6 +16,7 @@ final class SessionModel: ObservableObject {
     @Published var uploadedSeconds: Double = 0     // 本地已发出
     @Published var serverSeconds: Double = 0       // 服务端确认收到(唯一可信的数)
     @Published var reconnectCount = 0
+    @Published var countersText = ""   // 设置页里显示的四项计数
 
     private let capture = AudioCapture()
     private let ws = WSClient()
@@ -59,6 +60,10 @@ final class SessionModel: ObservableObject {
                 self.totalBytes += n
                 self.audioSeconds = Double(self.totalBytes) / 2 / 16000
                 if self.captureBlocks % 50 == 0 {
+                    let text = "收 \(self.receivedMsgs) 条 / 文本 \(self.partials) 条 / 发出 \(self.sentFrames) 帧 / 采集 \(self.captureBlocks) 块"
+                    self.countersText = text
+                    CrashLog.counters(received: self.receivedMsgs, sent: self.sentFrames,
+                                      partials: self.partials, frames: self.captureBlocks)
                     CrashLog.step("心跳: 录 \(Int(self.audioSeconds))s / 传 \(Int(self.uploadedSeconds))s / 服务端收到 \(Int(self.serverSeconds))s / 重连 \(self.reconnectCount) 次")
                 }
             }
@@ -71,6 +76,8 @@ final class SessionModel: ObservableObject {
     func toggle() { isRecording ? stop() : start() }
 
     func resetServerURL() { serverURL = "wss://100.64.0.2:8790/stream" }
+
+    func clearCrashNote() { CrashLog.clear() }
 
     private func start() {
         guard let url = URL(string: serverURL), url.scheme == "wss" || url.scheme == "ws" else {
