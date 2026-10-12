@@ -17,7 +17,7 @@ final class SessionModel: ObservableObject {
     private var totalBytes = 0
 
     init() {
-        serverURL = UserDefaults.standard.string(forKey: "serverURL") ?? "ws://100.64.0.2:8790/stream"
+        serverURL = UserDefaults.standard.string(forKey: "serverURL") ?? "wss://100.64.0.2:8790/stream"
         let ws = self.ws
         ws.onText = { [weak self] text in
             Task { @MainActor in self?.handle(text) }
@@ -41,8 +41,8 @@ final class SessionModel: ObservableObject {
     }
 
     private func start() {
-        guard let url = URL(string: serverURL), url.scheme == "ws" || url.scheme == "wss" else {
-            status = "服务器地址无效(应形如 ws://100.64.0.2:8790/stream)"
+        guard let url = URL(string: serverURL), url.scheme == "wss" || url.scheme == "ws" else {
+            status = "服务器地址无效(应形如 wss://100.64.0.2:8790/stream)"
             return
         }
         lines = []

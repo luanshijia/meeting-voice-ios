@@ -15,16 +15,13 @@ targets:
       path: Support/Info.plist
       properties:
         CFBundleDisplayName: MeetingVoice
+        CFBundleVersion: 3
         UILaunchScreen: {}
         # 锁屏/后台继续录音的关键:后台音频模式
         UIBackgroundModes:
           - audio
         NSMicrophoneUsageDescription: 用于会议录音与实时转写
-        # iOS 默认禁止明文 ws://(ATS)。我们的转写服务在 xEdge 私网里、没有 TLS 证书,
-        # 所以这里放开:自签自用的 App,不上架,风险面就是"家里私网这一条链路"。
-        NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
-          NSAllowsLocalNetworking: true
+        # 走 wss:// + 自家 CA 签发的证书,ATS 保持 iOS 默认的严格策略(不加任何豁免)。
         NSLocalNetworkUsageDescription: 连接你家里的转写服务(xEdge 私网)
     settings:
       base:

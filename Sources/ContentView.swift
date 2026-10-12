@@ -66,6 +66,11 @@ struct ContentView: View {
             }
             .padding()
             .navigationTitle("MeetingVoice")
+            .overlay(alignment: .bottom) {
+                Text("build 3 · wss + 自家 CA")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }
