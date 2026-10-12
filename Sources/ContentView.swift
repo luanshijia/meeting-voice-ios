@@ -1,111 +1,149 @@
 import SwiftUI
 
-/// 站 2 的界面:服务器地址 + 开始/停止 + 滚动字幕。
-/// 顶部那块是"黑匣子":有崩溃就显示崩因 + 崩溃前最后 30 步流水。
+/// 主界面:没有大标题(省竖屏空间)、网址收进"设置"、转写文字按阅读优化。
+/// 右上角三个数字:录(本地采集)/ 传(本地发出)/ 收(服务端确认收到,唯一可信)。
 struct ContentView: View {
     @StateObject private var model = SessionModel()
+    @State private var showSettings = false
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                Text(model.status)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 8) {
+                    metric("录", model.audioSeconds, .primary)
+                    metric("传", model.uploadedSeconds, .primary)
+                    metric("收", model.serverSeconds,
+                           (model.uploadedSeconds - model.serverSeconds) > 3 ? .red : .green)
+                }
+
+                Button { showSettings = true } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 17))
+                }
+            }
+            .padding(.top, 4)
+
+            Button {
+                model.toggle()
+            } label: {
+                Label(model.isRecording ? "停止" : "开始录音",
+                      systemImage: model.isRecording ? "stop.circle.fill" : "record.circle")
+                    .frame(maxWidth: .infinity)
+                    .font(.title3.weight(.semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(model.isRecording ? .red : .accentColor)
+            .controlSize(.large)
+
+            if model.reconnectCount > 0 {
+                Text("本次断线重连 \(model.reconnectCount) 次(音频已续传,可能分多个文件)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        ForEach(Array(model.lines.enumerated()), id: \.offset) { idx, line in
+                            Text(line)
+                                .font(.system(size: 20))
+                                .lineSpacing(8)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .id(idx)
+                        }
+                        if !model.partial.isEmpty {
+                            Text(model.partial)
+                                .font(.system(size: 20))
+                                .lineSpacing(8)
+                                .foregroundStyle(.blue)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .id("partial")
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+                .onChange(of: model.partial) { _, newValue in
+                    guard !newValue.isEmpty else { return }
+                    proxy.scrollTo("partial", anchor: .bottom)
+                }
+                .onChange(of: model.lines.count) { _, newValue in
+                    guard newValue > 0 else { return }
+                    proxy.scrollTo(newValue - 1, anchor: .bottom)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 8)
+        .sheet(isPresented: $showSettings) { SettingsSheet(model: model) }
+    }
+
+    private func metric(_ label: String, _ value: Double, _ color: Color) -> some View {
+        VStack(spacing: -1) {
+            Text(label).font(.system(size: 9)).foregroundStyle(.secondary)
+            Text(value > 0 ? String(format: "%.0f", value) : "—")
+                .font(.system(size: 13, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(color)
+        }
+        .frame(width: 30)
+    }
+}
+
+/// 设置页:网址、黑匣子信息都收在这里,平时主界面干净
+struct SettingsSheet: View {
+    @ObservedObject var model: SessionModel
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 10) {
-                if model.crashNote != nil || model.stepNote != nil {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("上次异常(黑匣子)").font(.caption).bold()
-                            Spacer()
-                            Button("清空") { model.clearCrashNote() }.font(.caption)
-                        }
-                        if let c = model.crashNote {
-                            Text(c).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
-                        }
-                        if let s = model.stepNote {
-                            Text("最近步骤:").font(.caption2).foregroundStyle(.secondary)
-                            Text(s).font(.system(size: 10, design: .monospaced)).textSelection(.enabled)
-                        }
-                        if let n = model.counterNote {
-                            Text("计数:" + n).font(.system(size: 10, design: .monospaced))
-                        }
-                    }
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.red.opacity(0.12))
-                    .cornerRadius(8)
-                }
-
-                HStack(spacing: 8) {
-                    TextField("服务器地址", text: $model.serverURL)
-                        .textFieldStyle(.roundedBorder)
+            Form {
+                Section("服务器地址") {
+                    TextField("wss://100.64.0.2:8790/stream", text: $model.serverURL)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
-                    VStack(alignment: .trailing, spacing: 0) {
-                        Text(model.audioSeconds > 0 ? String(format: "录 %.0fs", model.audioSeconds) : "—")
-                            .font(.footnote)
-                        Text(model.uploadedSeconds > 0 ? String(format: "传 %.0fs", model.uploadedSeconds) : "")
-                            .font(.caption2)
-                            .foregroundStyle(model.uploadedSeconds + 3 < model.audioSeconds ? .red : .secondary)
-                    }
-                    .frame(width: 64, alignment: .trailing)
+                        .font(.system(size: 15, design: .monospaced))
+                    Button("恢复默认地址") { model.resetServerURL() }
                 }
 
-                Button {
-                    model.toggle()
-                } label: {
-                    Label(model.isRecording ? "停止" : "开始录音",
-                          systemImage: model.isRecording ? "stop.circle.fill" : "record.circle")
-                        .frame(maxWidth: .infinity)
-                        .font(.headline)
+                if let crash = CrashLog.previousCrashFile ?? CrashLog.lastFailure {
+                    Section("上次异常(黑匣子)") {
+                        Text(crash).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+                        Button("清空") { model.clearCrashNote() }
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(model.isRecording ? .red : .accentColor)
-
-                if model.reconnectCount > 0 {
-                    Text("本次已断线重连 \(model.reconnectCount) 次(音频已续传,可能分成多个文件)")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                if let steps = CrashLog.previousSteps {
+                    Section("崩溃前最近步骤") {
+                        Text(steps).font(.system(size: 10, design: .monospaced)).textSelection(.enabled)
+                    }
                 }
-
-                Text(model.status)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                Divider()
-
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 6) {
-                            ForEach(Array(model.lines.enumerated()), id: \.offset) { idx, line in
-                                Text(line)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .id(idx)
-                            }
-                            if !model.partial.isEmpty {
-                                Text(model.partial)
-                                    .foregroundStyle(.blue)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .id("partial")
-                            }
-                        }
-                        .padding(.vertical, 2)
+                if let counters = CrashLog.counters {
+                    Section("计数") {
+                        Text(counters).font(.system(size: 11, design: .monospaced))
                     }
-                    .onChange(of: model.partial) { _, newValue in
-                        guard !newValue.isEmpty else { return }
-                        proxy.scrollTo("partial", anchor: .bottom)
-                    }
-                    .onChange(of: model.lines.count) { _, newValue in
-                        guard newValue > 0 else { return }
-                        proxy.scrollTo(newValue - 1, anchor: .bottom)
-                    }
+                }
+                Section {
+                    Text("v0.1.4 · build 9 · wss + 自家 CA")
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
             }
-            .padding()
-            .navigationTitle("MeetingVoice")
-            .overlay(alignment: .bottom) {
-                Text("v0.1.3 · build 8 · wss + 自家 CA")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            .navigationTitle("设置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
             }
         }
     }
