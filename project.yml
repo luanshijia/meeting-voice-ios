@@ -31,6 +31,11 @@ targets:
         CFBundleDisplayName: MeetingVoice 广播
         CFBundleShortVersionString: "0.3.0"
         CFBundleVersion: "12"
+        # 必须写在 properties 里:XcodeGen 会用这里的属性【覆盖】path 指向的 Info.plist,
+        # 只写在文件里会被覆盖掉(实测:CI 报 "NSExtension:NSExtensionPointIdentifier Does Not Exist")
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.broadcast-services-upload
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SampleHandler
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.luanshijia.meetingvoice.broadcast

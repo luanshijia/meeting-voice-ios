@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 注意:此文件由 xcodegen 依据 project.yml 的 info.properties 重新生成;
+     要改键值请改 project.yml,只改这里会在下次 generate 时被覆盖。 -->
 <plist version="1.0">
 <dict>
 	<key>NSExtension</key>
