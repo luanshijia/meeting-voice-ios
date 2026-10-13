@@ -114,6 +114,7 @@ struct SettingsSheet: View {
         NavigationStack {
             Form {
                 connectionSection
+                ProbeSection()
                 crashSection
                 stepsSection
                 versionSection
@@ -178,7 +179,7 @@ struct SettingsSheet: View {
 
     private var versionSection: some View {
         Section {
-            Text("v0.2.0 · build 11 · LiveKit(WebRTC)")
+            Text("v0.3.0 · build 12 · 扩展探针")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }

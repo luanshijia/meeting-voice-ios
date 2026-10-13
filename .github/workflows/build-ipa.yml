@@ -51,6 +51,11 @@ jobs:
           APP="$RUNNER_TEMP/MeetingVoice.xcarchive/Products/Applications/MeetingVoice.app"
           test -d "$APP"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
+          # 广播扩展必须在包里:CI 绿不等于嵌进去了,漏嵌要到手机上才发现(见项目笔记)
+          test -d "$APP/PlugIns/MeetingVoiceBroadcast.appex"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/PlugIns/MeetingVoiceBroadcast.appex/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$APP/PlugIns/MeetingVoiceBroadcast.appex/Info.plist"
+          file "$APP/PlugIns/MeetingVoiceBroadcast.appex/MeetingVoiceBroadcast"
           mkdir -p "$RUNNER_TEMP/ipa/Payload"
           cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/"
           cd "$RUNNER_TEMP/ipa"

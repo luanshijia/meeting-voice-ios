@@ -16,6 +16,37 @@ packages:
     from: "2.17.0"
 
 targets:
+  # 广播扩展(阶段二前置探针):只记录「对方声音 / 我方麦克风」的计数与采样格式,
+  # 不做任何传输、不依赖 LiveKit —— 探针要把变量压到最少。
+  # 单独做一个 target 的真正意义:让「带 appex 的包」真的被签一次,回答
+  # 「免费自签能不能把带扩展的包装进手机」这个阶段二最大未知。
+  MeetingVoiceBroadcast:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Broadcast
+    info:
+      path: Broadcast/Info.plist
+      properties:
+        CFBundleDisplayName: MeetingVoice 广播
+        CFBundleShortVersionString: "0.3.0"
+        CFBundleVersion: "12"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.luanshijia.meetingvoice.broadcast
+        PRODUCT_NAME: MeetingVoiceBroadcast
+        MARKETING_VERSION: "0.3.0"
+        CURRENT_PROJECT_VERSION: "12"
+        SWIFT_VERSION: "5.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        # App Group:主 App 与扩展共享容器(探针日志走这里读回)
+        CODE_SIGN_ENTITLEMENTS: Broadcast/Broadcast.entitlements
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGN_IDENTITY: ""
+        CODE_SIGNING_REQUIRED: NO
+
   MeetingVoice:
     type: application
     platform: iOS
@@ -24,14 +55,18 @@ targets:
     dependencies:
       - package: LiveKit
         product: LiveKit
+      # 扩展嵌进 PlugIns/;不签名 —— 侧载时由 SideStore 一起重签
+      - target: MeetingVoiceBroadcast
+        embed: true
+        codeSign: false
     info:
       path: Support/Info.plist
       properties:
         CFBundleDisplayName: MeetingVoice
         # 必须写成带引号的字符串:YAML 会把 6 当数字,CFNetwork 拼 User-Agent 时
         # 拿到数字会抛异常直接 abort(实测崩溃栈:initializeUserAgentString)
-        CFBundleShortVersionString: "0.2.0"
-        CFBundleVersion: "11"
+        CFBundleShortVersionString: "0.3.0"
+        CFBundleVersion: "12"
         UILaunchScreen: {}
         # 锁屏/后台继续录音的关键:后台音频模式
         UIBackgroundModes:
@@ -43,14 +78,16 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.luanshijia.meetingvoice
         PRODUCT_NAME: MeetingVoice
-        MARKETING_VERSION: "0.2.0"
-        CURRENT_PROJECT_VERSION: "11"
+        MARKETING_VERSION: "0.3.0"
+        CURRENT_PROJECT_VERSION: "12"
         SWIFT_VERSION: "5.0"
         # 显式锁定:接 SwiftPM 依赖后产物 Info.plist 的 MinimumOSVersion 曾变成 13.0(依赖的声明下限),
         # 而代码用了 iOS 17 的 API —— 写死避免漂移。
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: NO
+        # App Group:与广播扩展共享容器
+        CODE_SIGN_ENTITLEMENTS: Support/MeetingVoice.entitlements
         # 纯验证 CI 出包通路:不签名
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGN_IDENTITY: ""
