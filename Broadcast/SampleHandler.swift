@@ -27,6 +27,8 @@ final class SampleHandler: RPBroadcastSampleHandler {
     //   阶段二真扩展的**前提**——这条通道一旦通,阶段二最担心的那件事就不担心了。
     private let reportURL = "https://100.64.0.2:7443/probe"
     private var ticker: DispatchSourceTimer?
+    /// 5A:把「对方的声音」发回家里的发送器(见 IngestSender.swift)
+    private var ingest: IngestSender?
 
     private var counts: [String: Int] = ["audioApp": 0, "audioMic": 0, "video": 0]  // 回调次数
     private var frames: [String: Int] = ["audioApp": 0, "audioMic": 0]             // 真实采样数
@@ -80,7 +82,8 @@ final class SampleHandler: RPBroadcastSampleHandler {
         log("计数 回调 audioApp=\(counts["audioApp"]!) audioMic=\(counts["audioMic"]!) video=\(counts["video"]!) "
             + "| 采样 app=\(frames["audioApp"]!)(≈\(seconds("audioApp"))秒) "
             + "mic=\(frames["audioMic"]!)(≈\(seconds("audioMic"))秒) "
-            + "| App Group=\(matchedGroup ?? "不可用") \(note)")
+            + "| App Group=\(matchedGroup ?? "不可用") "
+            + "| 5A \(ingest?.status ?? "未启动") \(note)")
     }
 
     // MARK: - 回信道 ②:把计数发到家里(每 3 秒一次 + 启动/结束各一次)
@@ -89,6 +92,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         q += "&fapp=\(frames["audioApp"]!)&fmic=\(frames["audioMic"]!)"
         q += "&sapp=\(seconds("audioApp"))&smic=\(seconds("audioMic"))"
         q += "&bg=\(fileURL() == nil ? 0 : 1)&bgid=\(matchedGroup ?? "none")"
+        q += "&ingest=\(ingest?.status ?? "off")"
         for (k, v) in formats { q += "&fmt_\(k)=\(v)" }
         let escaped = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
         guard let url = URL(string: "\(reportURL)?\(escaped)") else { return }
@@ -104,6 +108,9 @@ final class SampleHandler: RPBroadcastSampleHandler {
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         log("=== 扩展启动(bundle=\(Bundle.main.bundleIdentifier ?? "?") App Group=\(fileURL() == nil ? "不可用" : "可用") ===")
         flush()
+        // 5A:「对方的声音」走这条路回家(麦克风那一路由主 App 的 LiveKit 麦克风轨负责,两条互不干扰)
+        ingest = IngestSender { [weak self] line in self?.log(line) }
+        log("5A 已就绪:按 16k 单声道把对方的声音发回家里")
         report("start")                                  // 立刻发一次:哪怕零音频,也能证明"扩展活着 + 能连上家里"
         let t = DispatchSource.makeTimerSource(queue: .global())
         t.schedule(deadline: .now() + 3, repeating: 3)
@@ -116,6 +123,9 @@ final class SampleHandler: RPBroadcastSampleHandler {
     override func broadcastResumed() { log("扩展恢复") }
 
     override func broadcastFinished() {
+        ingest?.close()
+        log("5A 收尾: \(ingest?.status ?? "-")")
+        ingest = nil
         report("finish")
         ticker?.cancel()
         ticker = nil
@@ -130,6 +140,8 @@ final class SampleHandler: RPBroadcastSampleHandler {
             counts["audioApp", default: 0] += 1
             frames["audioApp", default: 0] += CMSampleBufferGetNumSamples(sampleBuffer)
             describeIfNeeded(sampleBuffer, name: "audioApp")
+            /// 5A:对方的声音 → 下混/重采样/翻转字节序 → 发回家里
+            ingest?.append(sampleBuffer)
         case .audioMic:
             counts["audioMic", default: 0] += 1
             frames["audioMic", default: 0] += CMSampleBufferGetNumSamples(sampleBuffer)

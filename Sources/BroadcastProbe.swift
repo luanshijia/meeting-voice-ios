@@ -116,7 +116,7 @@ struct ProbeSection: View {
         } header: {
             Text("广播扩展探针(阶段二)")
         } footer: {
-            Text("两条回信道:①App Group 共享文件(主 App 能读,要把这条组挂到两个 App ID 上并重签才生效);②扩展每 3 秒把计数 https 发到家里 7443(不依赖 App Group,家里日志里能看到 —— 这条同时验证了「扩展能不能连上家里」,那是阶段二真扩展的前提)。三种失败要分开看:①侧载装不上=免费自签不支持带扩展的包;②App Group 显示不可用=entitlement 没被签进来;③可用但日志为空=扩展没被启动或没收到音频。")
+            Text("三条回信道:①「对方的声音」用 https 每 0.5 秒一块发回家里的 /ingest(5A,这是分人的关键);②App Group 共享文件(主 App 读回日志);③每 3 秒把计数发到家里 /probe(不依赖 App Group 的保底诊断)。三种失败要分开看:①侧载装不上=免费自签不支持带扩展的包;②App Group 显示不可用=entitlement 没被签进来;③可用但日志为空=扩展没被启动或没收到音频。")
         }
         .onAppear { load() }
     }
