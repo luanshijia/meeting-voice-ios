@@ -20,36 +20,59 @@ final class IngestSender {
     private let session: URLSession
 
     private let targetRate: Double = 16000
-    private let chunkSeconds: Double = 0.5      // 0.5 秒一块:延迟小,频率也够低
+    private let chunkSeconds: Double = 0.5      // 0.5 秒一块:延迟小,频率够低
+    private let maxQueued = 6                   // 最多积压 3 秒音频
+    private let stallSeconds: TimeInterval = 8  // 一块超过 8 秒没回来 = 判卡住
 
     private var pcm: [Int16] = []
+    private var queue: [[Int16]] = []
     private var rate: Double = 44100
     private var channels = 2
     private var bigEndian = true
     private var described = false
+    private var warnedBits = false
 
-    private var inFlight = false
+    private var sending = false
+    private var token = 0
+    private var inFlightSince: Date?
+    private var watchdog: DispatchSourceTimer?
+    /// 所有状态(队列/计数)只在这条串行队列上改:采集线程、回调线程、看门狗三方绝不并发碰数组
+    private let state = DispatchQueue(label: "mv.ingest.state")
+
     private var sentChunks = 0
     private var sentBytes = 0
     private var droppedChunks = 0
     private var failedUploads = 0
+    private var stalls = 0
+    private var avgMs = 0
     private var lastError = ""
 
     init(log: @escaping (String) -> Void) {
         self.log = log
         let cfg = URLSessionConfiguration.ephemeral
-        cfg.timeoutIntervalForRequest = 10
-        cfg.httpMaximumConnectionsPerHost = 1     // 串行:别让块在内存里排队堆起来
+        cfg.timeoutIntervalForRequest = 20
+        cfg.httpMaximumConnectionsPerHost = 1     // 串行:到达顺序 = 录音顺序
         session = URLSession(configuration: cfg)
+        let t = DispatchSource.makeTimerSource(queue: .global())
+        t.schedule(deadline: .now() + 2, repeating: 2)
+        t.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.state.async { self.checkStallLocked() }
+        }
+        t.resume()
+        watchdog = t
     }
 
     /// 给探针面板/上报用的一行状态(纯 ASCII,方便放进 URL 和共享文件)
     var status: String {
-        "chunks=\(sentChunks),kb=\(sentBytes / 1024),drop=\(droppedChunks),fail=\(failedUploads)\(lastError.isEmpty ? "" : ",err=\(lastError)")"
+        "chunks=\(sentChunks),kb=\(sentBytes / 1024),q=\(queue.count),drop=\(droppedChunks),fail=\(failedUploads),ms=\(avgMs)"
+            + (lastError.isEmpty ? "" : ",err=\(lastError)")
     }
 
     func close() {
         flush(final: true)
+        watchdog?.cancel()
+        watchdog = nil
         session.invalidateAndCancel()
     }
 
@@ -65,10 +88,11 @@ final class IngestSender {
             let bits = Int(asbd.pointee.mBitsPerChannel)
             log("5A 首帧格式: \(Int(rate))Hz \(channels)声道 \(bits)bit \(bigEndian ? "大端" : "小端") → 目标 16k 单声道 s16le")
             if bits != 16 {
+                warnedBits = true
                 log("5A 放弃:只处理 16bit,实际 \(bits)bit —— 宁可不上报也不送噪声")
-                return
             }
         }
+        if warnedBits { return }
         guard let block = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
         var length = 0
         var ptr: UnsafeMutablePointer<Int8>?
@@ -114,7 +138,7 @@ final class IngestSender {
         while pcm.count >= need {
             let chunk = Array(pcm[0..<need])
             pcm.removeFirst(need)
-            upload(chunk)
+            enqueue(chunk)
         }
     }
 
@@ -123,41 +147,82 @@ final class IngestSender {
         guard final, !pcm.isEmpty else { return }
         let chunk = pcm
         pcm.removeAll()
-        upload(chunk)
+        enqueue(chunk)
     }
 
-    private func upload(_ chunk: [Int16]) {
-        guard !inFlight else {           // 上一块还没回来:直接丢掉这块,不让内存堆积
+    private func enqueue(_ chunk: [Int16]) {
+        state.async { [weak self] in self?.enqueueLocked(chunk) }
+    }
+
+    private func enqueueLocked(_ chunk: [Int16]) {
+        guard queue.count < maxQueued else {      // 真积压超了才丢,并留计数
             droppedChunks += 1
+            if droppedChunks <= 3 || droppedChunks % 20 == 0 {
+                log("5A 积压超过 \(maxQueued) 块,丢弃一块(累计丢 \(droppedChunks))")
+            }
             return
         }
-        inFlight = true
+        queue.append(chunk)
+        pump()
+    }
+
+    private func pump() {                          // 只允许在 state 队列上调用
+        guard !sending, !queue.isEmpty else { return }
+        sending = true
+        token += 1
+        let myToken = token
+        inFlightSince = Date()
+        let chunk = queue.removeFirst()
+        let started = Date()
+
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         let body = chunk.withUnsafeBufferPointer { Data(buffer: $0) }
         session.uploadTask(with: req, from: body) { [weak self] _, resp, err in
             guard let self else { return }
-            self.inFlight = false
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
-            if let err {
-                self.failedUploads += 1
-                self.lastError = "net"
-                if self.failedUploads <= 3 || self.failedUploads % 20 == 0 {
-                    self.log("5A 上报失败(\(self.failedUploads)) code=\(code): \(err.localizedDescription)")
-                }
-                return
-            }
-            guard (200..<300).contains(code) else {
-                self.failedUploads += 1
-                self.lastError = "http\(code)"
-                if self.failedUploads <= 3 || self.failedUploads % 20 == 0 {
-                    self.log("5A 上报被拒(\(self.failedUploads)) code=\(code)")
-                }
-                return
-            }
-            self.sentChunks += 1
-            self.sentBytes += body.count
+            let text = err?.localizedDescription ?? ""
+            self.state.async { self.finish(myToken, bytes: body.count, code: code, err: text, ms: ms) }
         }.resume()
+    }
+
+    private func finish(_ myToken: Int, bytes: Int, code: Int, err: String, ms: Int) {
+        guard myToken == token else { return }      // 看门狗已作废这块 → 忽略旧回调
+        avgMs = avgMs == 0 ? ms : (avgMs * 3 + ms) / 4
+        sending = false
+        inFlightSince = nil
+        if !err.isEmpty {
+            failedUploads += 1
+            lastError = "net"
+            if failedUploads <= 3 || failedUploads % 20 == 0 {
+                log("5A 上报失败(\(failedUploads)) code=\(code): \(err)")
+            }
+        } else if !(200..<300).contains(code) {
+            failedUploads += 1
+            lastError = "http\(code)"
+            if failedUploads <= 3 || failedUploads % 20 == 0 {
+                log("5A 上报被拒(\(failedUploads)) code=\(code)")
+            }
+        } else {
+            sentChunks += 1
+            sentBytes += bytes
+        }
+        pump()
+    }
+
+    /// 看门狗:一块超过 stallSeconds 还没回来 → 判卡住,作废旧回调,继续发
+    private func checkStallLocked() {
+        guard sending, let since = inFlightSince,
+              Date().timeIntervalSince(since) > stallSeconds else { return }
+        stalls += 1
+        failedUploads += 1
+        lastError = "stall"
+        log("5A 上一块超过 \(Int(stallSeconds)) 秒没回来,判卡住并继续发(第 \(stalls) 次)")
+        sending = false
+        inFlightSince = nil
+        token += 1          // 让那个迟迟不回的回调作废
+        pump()
     }
 }
