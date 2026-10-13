@@ -1,7 +1,10 @@
 name: build-ipa
 
-# 在云端 macOS 上生成 Xcode 工程 → 编译 → 产出未签名 .ipa
-# 未签名即可:签名由手机上的 SideStore 用你的免费 Apple ID 完成。
+# 在云端 macOS 上生成 Xcode 工程 → 编译 → 产出 .ipa(ad-hoc 签名,把 entitlements 嵌进包)
+# 为什么是 ad-hoc 而不是真签名:真签名要证书,而证书由手机上的 SideStore 用免费 Apple ID 完成。
+# 但我们**必须**让包里带上 entitlement(App Group)——否则 SideStore 无从得知"这个 App 要哪个
+# App Group",只能靠人手在开发者门户里填(实测踩过,兜了一圈)。ad-hoc 签名(`-`)不是有效证书、
+# 不能直接在真机跑,但它会把 entitlements 真的写进包的签名里,SideStore 重签时就能读到。
 on:
   push:
     branches: [main]
@@ -45,7 +48,26 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             archive
 
-      - name: 打包成未签名 .ipa
+      - name: 嵌入 entitlements(ad-hoc 签名)
+        run: |
+          set -eux
+          APP="$RUNNER_TEMP/MeetingVoice.xcarchive/Products/Applications/MeetingVoice.app"
+          APPEX="$APP/PlugIns/MeetingVoiceBroadcast.appex"
+          test -d "$APPEX"
+          # 顺序:先嵌套(扩展)后主包。用 XcodeGen 里声明的同一份 entitlements 文件。
+          codesign --force --sign - --timestamp=none --entitlements Broadcast/Broadcast.entitlements "$APPEX"
+          codesign --force --sign - --timestamp=none --entitlements Support/MeetingVoice.entitlements "$APP"
+          echo "=== 扩展 entitlements ==="; codesign -d --entitlements :- "$APPEX" 2>&1 || true
+          echo "=== 主包 entitlements ==="; codesign -d --entitlements :- "$APP" 2>&1 || true
+          # 硬校验:App Group 必须真的进包(CI 绿≠东西在包里,这条踩过好几次)
+          for BIN in "$APPEX" "$APP"; do
+            DUMP="$(codesign -d --entitlements :- "$BIN" 2>&1 || codesign -d --entitlements - "$BIN" 2>&1 || true)"
+            echo "$DUMP" | grep -q "group.com.luanshijia.meetingvoice" \
+              || { echo "缺 App Group entitlement: $BIN"; exit 1; }
+          done
+          echo "两个二进制的 App Group entitlement 都已在包里 ✓"
+
+      - name: 打包成 .ipa
         run: |
           set -eux
           APP="$RUNNER_TEMP/MeetingVoice.xcarchive/Products/Applications/MeetingVoice.app"
