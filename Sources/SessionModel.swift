@@ -69,7 +69,10 @@ final class SessionModel: ObservableObject {
                 self.partialWho = who
             }
         }
-        note("App 启动,v0.2.0(build 11, LiveKit)")
+        // 从 Bundle 读真实版本(以前写死成 v0.2.0(build 11),截图里会误导人)
+        let ver = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        note("App 启动,v\(ver)(build \(build), LiveKit)")
     }
 
     func toggle() { isRecording ? stop() : start() }
