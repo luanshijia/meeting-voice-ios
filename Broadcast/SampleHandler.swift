@@ -11,8 +11,15 @@ import Foundation
 /// 真实扩展再换成 LiveKit 官方示例的 LKSampleHandler。
 final class SampleHandler: RPBroadcastSampleHandler {
 
-    private let groupID = "group.com.luanshijia.meetingvoice"
     private let fileName = "broadcast-probe.log"
+
+    /// 与主 App(BroadcastProbe.groupCandidates)保持同一份候选表。
+    /// 教训:上一版扩展只试了原组名,结果 App 侧「App Group 可用」而扩展侧打不开(bg=0)
+    /// —— 因为 SideStore 重签时注进的组名可能带团队号后缀,两边试的名字不一致就露不出来。
+    private static let groupCandidates = ["group.com.luanshijia.meetingvoice",
+                                          "group.com.luanshijia.meetingvoice.458RP2552K"]
+    private var matchedGroup: String?
+    private var groupScanned = false
 
     // 回信道 ①:App Group 共享文件(主 App 能读,前提是 entitlement 签进去了)。
     // 回信道 ②:https 直接发到家里 7443(证书已信任、端口已放行、不新增端口/不改防火墙/不需要 ATS 豁免)。
@@ -21,18 +28,38 @@ final class SampleHandler: RPBroadcastSampleHandler {
     private let reportURL = "https://100.64.0.2:7443/probe"
     private var ticker: DispatchSourceTimer?
 
-    private var counts: [String: Int] = ["audioApp": 0, "audioMic": 0, "video": 0]
-    private var bytes: [String: Int] = ["audioApp": 0, "audioMic": 0]
+    private var counts: [String: Int] = ["audioApp": 0, "audioMic": 0, "video": 0]  // 回调次数
+    private var frames: [String: Int] = ["audioApp": 0, "audioMic": 0]             // 真实采样数
+    private var rates: [String: Double] = [:]                                      // 采样率:用来把采样数换成秒
     private var described: Set<String> = []
     private var formats: [String: String] = [:]
     private var lastFlush = Date.distantPast
 
     // MARK: - 往 App Group 里写一行
-    private func fileURL() -> URL? {
-        guard let dir = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID) else {
-            return nil
+    private func groupDir() -> URL? {
+        if let matchedGroup,
+           let dir = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: matchedGroup) {
+            return dir
         }
-        return dir.appendingPathComponent(fileName)
+        if groupScanned && matchedGroup == nil { return nil }   // 扫过一遍都没有,不必每次重扫
+        for id in Self.groupCandidates {
+            if let dir = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: id) {
+                matchedGroup = id
+                groupScanned = true
+                return dir
+            }
+        }
+        groupScanned = true
+        return nil
+    }
+
+    private func fileURL() -> URL? { groupDir()?.appendingPathComponent(fileName) }
+
+    /// 采样数 ÷ 采样率 = 秒。上一版用 CMSampleBufferGetTotalSampleSize 数字节,对音频 buffer
+    /// 恒返回 0(所以日志里一直 bapp=0),改用真实采样数,远端就能直接换算成时长。
+    private func seconds(_ name: String) -> String {
+        guard let f = frames[name], let r = rates[name], r > 0 else { return "?" }
+        return String(format: "%.1f", Double(f) / r)
     }
 
     private func log(_ line: String) {
@@ -50,14 +77,18 @@ final class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func flush(_ note: String = "") {
-        log("计数 audioApp=\(counts["audioApp"]!) audioMic=\(counts["audioMic"]!) video=\(counts["video"]!) "
-            + "| 字节 app=\(bytes["audioApp"]!) mic=\(bytes["audioMic"]!) \(note)")
+        log("计数 回调 audioApp=\(counts["audioApp"]!) audioMic=\(counts["audioMic"]!) video=\(counts["video"]!) "
+            + "| 采样 app=\(frames["audioApp"]!)(≈\(seconds("audioApp"))秒) "
+            + "mic=\(frames["audioMic"]!)(≈\(seconds("audioMic"))秒) "
+            + "| App Group=\(matchedGroup ?? "不可用") \(note)")
     }
 
     // MARK: - 回信道 ②:把计数发到家里(每 3 秒一次 + 启动/结束各一次)
     private func report(_ note: String = "") {
         var q = "note=\(note)&app=\(counts["audioApp"]!)&mic=\(counts["audioMic"]!)&vid=\(counts["video"]!)"
-        q += "&bapp=\(bytes["audioApp"]!)&bmic=\(bytes["audioMic"]!)&bg=\(fileURL() == nil ? 0 : 1)"
+        q += "&fapp=\(frames["audioApp"]!)&fmic=\(frames["audioMic"]!)"
+        q += "&sapp=\(seconds("audioApp"))&smic=\(seconds("audioMic"))"
+        q += "&bg=\(fileURL() == nil ? 0 : 1)&bgid=\(matchedGroup ?? "none")"
         for (k, v) in formats { q += "&fmt_\(k)=\(v)" }
         let escaped = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
         guard let url = URL(string: "\(reportURL)?\(escaped)") else { return }
@@ -97,11 +128,11 @@ final class SampleHandler: RPBroadcastSampleHandler {
         switch sampleBufferType {
         case .audioApp:
             counts["audioApp", default: 0] += 1
-            bytes["audioApp", default: 0] += CMSampleBufferGetTotalSampleSize(sampleBuffer)
+            frames["audioApp", default: 0] += CMSampleBufferGetNumSamples(sampleBuffer)
             describeIfNeeded(sampleBuffer, name: "audioApp")
         case .audioMic:
             counts["audioMic", default: 0] += 1
-            bytes["audioMic", default: 0] += CMSampleBufferGetTotalSampleSize(sampleBuffer)
+            frames["audioMic", default: 0] += CMSampleBufferGetNumSamples(sampleBuffer)
             describeIfNeeded(sampleBuffer, name: "audioMic")
         case .video:
             counts["video", default: 0] += 1
@@ -127,6 +158,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         let desc = "\(Int(asbd.pointee.mSampleRate))Hz_\(asbd.pointee.mChannelsPerFrame)ch_"
             + "\(asbd.pointee.mBitsPerChannel)bit_\(bigEndian ? "be" : "le")_il\(interleaved ? 1 : 0)"
         formats[name] = desc
+        rates[name] = asbd.pointee.mSampleRate
         log("\(name) 首帧格式: \(Int(asbd.pointee.mSampleRate))Hz \(asbd.pointee.mChannelsPerFrame)声道 "
             + "\(asbd.pointee.mBitsPerChannel)bit \(bigEndian ? "大端" : "小端") 交错=\(interleaved)")
     }

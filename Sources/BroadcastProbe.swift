@@ -31,10 +31,12 @@ enum BroadcastProbe {
     }
 
     static func groupStatus() -> String {
-        guard let url = containerURL() else {
+        guard containerURL() != nil else {
             return "不可用(试过 \(groupCandidates.count) 个候选名,都没命中)"
         }
-        return "可用 → \(url.lastPathComponent)"
+        // 显示【命中的组名】而不是容器 UUID —— UUID 看不出 SideStore 到底注进了哪个名字,
+        // 而那个名字决定了扩展要试哪个(上一版两边名字不一致,就是 App 绿、扩展打不开的原因)。
+        return "可用 → \(matchedGroup ?? "?")"
     }
 
     static func readLog(maxLines: Int = 60) -> String {
