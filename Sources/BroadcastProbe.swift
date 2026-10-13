@@ -10,12 +10,30 @@ enum BroadcastProbe {
     static let fileName = "broadcast-probe.log"
 
     /// nil = entitlement 没被签进去(App Group 不可用),这是探针要抓的第一种失败
+    /// 同时试几个候选名:免费自签下 SideStore 可能把团队号后缀注进去(实测见过
+    /// group.com.SideStore.SideStore.458RP2552K 这种写法),我们把两种都试一遍,并显示命中的是哪个。
+    static let groupCandidates = ["group.com.luanshijia.meetingvoice",
+                                  "group.com.luanshijia.meetingvoice.458RP2552K"]
+    static private(set) var matchedGroup: String?
+
     static func containerURL() -> URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID)
+        if let matchedGroup,
+           let u = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: matchedGroup) {
+            return u
+        }
+        for id in groupCandidates {
+            if let u = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: id) {
+                matchedGroup = id
+                return u
+            }
+        }
+        return nil
     }
 
     static func groupStatus() -> String {
-        guard let url = containerURL() else { return "不可用(entitlement 没签进去)" }
+        guard let url = containerURL() else {
+            return "不可用(试过 \(groupCandidates.count) 个候选名,都没命中)"
+        }
         return "可用 → \(url.lastPathComponent)"
     }
 
@@ -96,7 +114,7 @@ struct ProbeSection: View {
         } header: {
             Text("广播扩展探针(阶段二)")
         } footer: {
-            Text("三种失败要分开看:①侧载装不上=免费自签不支持带扩展的包;②App Group 显示不可用=entitlement 没签进去(要在 SideStore 里长按 App 那行做一次 Resign);③可用但日志为空=扩展没被启动或没收到音频。")
+            Text("两条回信道:①App Group 共享文件(主 App 能读,要把这条组挂到两个 App ID 上并重签才生效);②扩展每 3 秒把计数 https 发到家里 7443(不依赖 App Group,家里日志里能看到 —— 这条同时验证了「扩展能不能连上家里」,那是阶段二真扩展的前提)。三种失败要分开看:①侧载装不上=免费自签不支持带扩展的包;②App Group 显示不可用=entitlement 没被签进来;③可用但日志为空=扩展没被启动或没收到音频。")
         }
         .onAppear { load() }
     }

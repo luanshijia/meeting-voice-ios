@@ -14,9 +14,17 @@ final class SampleHandler: RPBroadcastSampleHandler {
     private let groupID = "group.com.luanshijia.meetingvoice"
     private let fileName = "broadcast-probe.log"
 
+    // 回信道 ①:App Group 共享文件(主 App 能读,前提是 entitlement 签进去了)。
+    // 回信道 ②:https 直接发到家里 7443(证书已信任、端口已放行、不新增端口/不改防火墙/不需要 ATS 豁免)。
+    //   为什么加第二条:App Group 能不能签进去在免费自签下不保证,而"扩展能不能连上家里"本身就是
+    //   阶段二真扩展的**前提**——这条通道一旦通,阶段二最担心的那件事就不担心了。
+    private let reportURL = "https://100.64.0.2:7443/probe"
+    private var ticker: DispatchSourceTimer?
+
     private var counts: [String: Int] = ["audioApp": 0, "audioMic": 0, "video": 0]
     private var bytes: [String: Int] = ["audioApp": 0, "audioMic": 0]
     private var described: Set<String> = []
+    private var formats: [String: String] = [:]
     private var lastFlush = Date.distantPast
 
     // MARK: - 往 App Group 里写一行
@@ -46,16 +54,40 @@ final class SampleHandler: RPBroadcastSampleHandler {
             + "| 字节 app=\(bytes["audioApp"]!) mic=\(bytes["audioMic"]!) \(note)")
     }
 
+    // MARK: - 回信道 ②:把计数发到家里(每 3 秒一次 + 启动/结束各一次)
+    private func report(_ note: String = "") {
+        var q = "note=\(note)&app=\(counts["audioApp"]!)&mic=\(counts["audioMic"]!)&vid=\(counts["video"]!)"
+        q += "&bapp=\(bytes["audioApp"]!)&bmic=\(bytes["audioMic"]!)&bg=\(fileURL() == nil ? 0 : 1)"
+        for (k, v) in formats { q += "&fmt_\(k)=\(v)" }
+        let escaped = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
+        guard let url = URL(string: "\(reportURL)?\(escaped)") else { return }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 5
+        URLSession.shared.dataTask(with: req) { [weak self] _, resp, err in
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+            self?.log("上报 note=\(note) → code=\(code) err=\(err?.localizedDescription ?? "无")")
+        }.resume()
+    }
+
     // MARK: - 生命周期
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
-        log("=== 扩展启动(bundle=\(Bundle.main.bundleIdentifier ?? "?")) App Group=\(fileURL() == nil ? "不可用" : "可用") ===")
+        log("=== 扩展启动(bundle=\(Bundle.main.bundleIdentifier ?? "?") App Group=\(fileURL() == nil ? "不可用" : "可用") ===")
         flush()
+        report("start")                                  // 立刻发一次:哪怕零音频,也能证明"扩展活着 + 能连上家里"
+        let t = DispatchSource.makeTimerSource(queue: .global())
+        t.schedule(deadline: .now() + 3, repeating: 3)
+        t.setEventHandler { [weak self] in self?.report("tick") }
+        t.resume()
+        ticker = t
     }
 
     override func broadcastPaused() { log("扩展被暂停") }
     override func broadcastResumed() { log("扩展恢复") }
 
     override func broadcastFinished() {
+        report("finish")
+        ticker?.cancel()
+        ticker = nil
         flush("(结束)")
         log("=== 扩展结束 ===")
     }
@@ -92,6 +124,9 @@ final class SampleHandler: RPBroadcastSampleHandler {
         described.insert(name)
         let bigEndian = (asbd.pointee.mFormatFlags & kAudioFormatFlagIsBigEndian) != 0
         let interleaved = (asbd.pointee.mFormatFlags & kAudioFormatFlagIsNonInterleaved) == 0
+        let desc = "\(Int(asbd.pointee.mSampleRate))Hz_\(asbd.pointee.mChannelsPerFrame)ch_"
+            + "\(asbd.pointee.mBitsPerChannel)bit_\(bigEndian ? "be" : "le")_il\(interleaved ? 1 : 0)"
+        formats[name] = desc
         log("\(name) 首帧格式: \(Int(asbd.pointee.mSampleRate))Hz \(asbd.pointee.mChannelsPerFrame)声道 "
             + "\(asbd.pointee.mBitsPerChannel)bit \(bigEndian ? "大端" : "小端") 交错=\(interleaved)")
     }
