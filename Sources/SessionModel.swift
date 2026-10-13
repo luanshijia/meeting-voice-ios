@@ -47,6 +47,10 @@ final class SessionModel: ObservableObject {
     private var cfg = LiveKitConfig.load()
     private let room = VoiceRoom()
     private var timer: Timer?
+    /// 上一次「停止」的断开动作。实测踩过:点停止后立刻再点开始,新旧两条连接同身份并存,
+    /// 服务端按 DUPLICATE_IDENTITY 把旧的那条踢掉(01:44:33 就是这么发生的)。
+    /// 所以下次连接前必须先等它落地。
+    private var pendingDisconnect: Task<Void, Never>?
 
     init() {
         room.onState = { [weak self] s in self?.status = s }
@@ -87,6 +91,8 @@ final class SessionModel: ObservableObject {
         isRecording = true
         let cfg = self.cfg
         Task {
+            if let d = pendingDisconnect { await d.value }   // 等上一次断开落地,避免同身份双连
+            pendingDisconnect = nil
             do {
                 try await room.connect(cfg)
                 self.startTimer()
@@ -103,7 +109,7 @@ final class SessionModel: ObservableObject {
         isRecording = false
         status = "已停止:本地推流 \(Int(recordedSeconds)) 秒,家里已识别 \(Int(serverSeconds)) 秒"
         note("用户停止:推流 \(Int(recordedSeconds))s / 家里识别 \(Int(serverSeconds))s")
-        Task { await room.disconnect() }
+        pendingDisconnect = Task { await room.disconnect() }
     }
 
     private func startTimer() {

@@ -23,6 +23,8 @@ final class IngestSender {
     private let chunkSeconds: Double = 0.5      // 0.5 秒一块:延迟小,频率够低
     private let maxQueued = 6                   // 最多积压 3 秒音频
     private let stallSeconds: TimeInterval = 8  // 一块超过 8 秒没回来 = 判卡住
+    private let silenceAfter: TimeInterval = 2  // app 声音停超过这个时间就补静音,保持"一条连续流"
+    private let maxSilenceSeconds: Double = 30  // 最多补 30 秒静音;更长的静音就断开,不写空白大文件
 
     private var pcm: [Int16] = []
     private var queue: [[Int16]] = []
@@ -46,6 +48,8 @@ final class IngestSender {
     private var stalls = 0
     private var avgMs = 0
     private var lastError = ""
+    private var lastAppAudio = Date.distantPast      // 上一次真的收到 app 声音的时刻
+    private var silenceChunks = 0                    // 已经补了多少块静音
 
     init(log: @escaping (String) -> Void) {
         self.log = log
@@ -65,7 +69,7 @@ final class IngestSender {
 
     /// 给探针面板/上报用的一行状态(纯 ASCII,方便放进 URL 和共享文件)
     var status: String {
-        "chunks=\(sentChunks),kb=\(sentBytes / 1024),q=\(queue.count),drop=\(droppedChunks),fail=\(failedUploads),ms=\(avgMs)"
+        "chunks=\(sentChunks),kb=\(sentBytes / 1024),q=\(queue.count),drop=\(droppedChunks),fail=\(failedUploads),ms=\(avgMs),sil=\(silenceChunks)"
             + (lastError.isEmpty ? "" : ",err=\(lastError)")
     }
 
@@ -155,6 +159,8 @@ final class IngestSender {
     }
 
     private func enqueueLocked(_ chunk: [Int16]) {
+        lastAppAudio = Date()                     // 真声音到了 → 静音计数归零
+        silenceChunks = 0
         guard queue.count < maxQueued else {      // 真积压超了才丢,并留计数
             droppedChunks += 1
             if droppedChunks <= 3 || droppedChunks % 20 == 0 {
@@ -163,6 +169,22 @@ final class IngestSender {
             return
         }
         queue.append(chunk)
+        pump()
+    }
+
+    /// app 声音停了就补静音块,让家里那侧始终是**一条连续流**。
+    /// 为什么:实测"有对方声音才发"会把同一个人切成 12 秒 + 7 秒两个文件,
+    /// 说话人分段和纪要的连贯性都被打断。补静音后家里只看到一条流,停顿由它自己判断。
+    private func maybeSendSilenceLocked() {
+        guard lastAppAudio != .distantPast else { return }              // 还没收到过真声音,别先灌静音
+        guard Date().timeIntervalSince(lastAppAudio) >= silenceAfter else { return }
+        let maxChunks = Int(maxSilenceSeconds / chunkSeconds)
+        var n = min(maxQueued - queue.count, 4)                          // 每次最多补 2 秒
+        if silenceChunks + n > maxChunks { n = maxChunks - silenceChunks }
+        guard n > 0 else { return }
+        let need = Int(targetRate * chunkSeconds)
+        for _ in 0..<n { queue.append([Int16](repeating: 0, count: need)) }
+        silenceChunks += n
         pump()
     }
 
@@ -214,15 +236,16 @@ final class IngestSender {
 
     /// 看门狗:一块超过 stallSeconds 还没回来 → 判卡住,作废旧回调,继续发
     private func checkStallLocked() {
-        guard sending, let since = inFlightSince,
-              Date().timeIntervalSince(since) > stallSeconds else { return }
-        stalls += 1
-        failedUploads += 1
-        lastError = "stall"
-        log("5A 上一块超过 \(Int(stallSeconds)) 秒没回来,判卡住并继续发(第 \(stalls) 次)")
-        sending = false
-        inFlightSince = nil
-        token += 1          // 让那个迟迟不回的回调作废
-        pump()
+        if sending, let since = inFlightSince, Date().timeIntervalSince(since) > stallSeconds {
+            stalls += 1
+            failedUploads += 1
+            lastError = "stall"
+            log("5A 上一块超过 \(Int(stallSeconds)) 秒没回来,判卡住并继续发(第 \(stalls) 次)")
+            sending = false
+            inFlightSince = nil
+            token += 1          // 让那个迟迟不回的回调作废
+            pump()
+        }
+        maybeSendSilenceLocked()      // 顺带:app 声音断了就补静音,保持连续流
     }
 }
