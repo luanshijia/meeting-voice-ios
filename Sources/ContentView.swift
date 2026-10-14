@@ -296,14 +296,14 @@ struct ContentView: View {
             }
             if tail.isEmpty {
                 Text(text)
-                    .font(.system(size: 17))
+                    .font(.system(size: 15))          // 用户口径 2026-10-15:字幕字号调小 2 号(17 → 15)
                     .lineSpacing(6)
                     .foregroundStyle(color)
                     .textSelection(.enabled)
             } else {
                 // 停顿标记跟在正文尾部同一行,小一号、灰一点
-                (Text(text).font(.system(size: 17)).foregroundColor(color)
-                 + Text("  " + tail).font(.system(size: 13)).foregroundColor(.secondary))
+                (Text(text).font(.system(size: 15)).foregroundColor(color)
+                 + Text("  " + tail).font(.system(size: 12)).foregroundColor(.secondary))
                     .lineSpacing(6)
                     .textSelection(.enabled)
             }
