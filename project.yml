@@ -33,8 +33,8 @@ targets:
         # (实测报错:An invalid value 'MeetingVoice MeetingVoice 广播' was provided
         #   for the parameter 'appIdName'.)→ 改成 ASCII 才能走「每个扩展注册 App ID」这条路。
         CFBundleDisplayName: MeetingVoiceBroadcast
-        CFBundleShortVersionString: "0.4.7"
-        CFBundleVersion: "23"
+        CFBundleShortVersionString: "0.4.8"
+        CFBundleVersion: "24"
         # 必须写在 properties 里:XcodeGen 会用这里的属性【覆盖】path 指向的 Info.plist,
         # 只写在文件里会被覆盖掉(实测:CI 报 "NSExtension:NSExtensionPointIdentifier Does Not Exist")
         NSExtension:
@@ -46,8 +46,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.luanshijia.meetingvoice.broadcast
         PRODUCT_NAME: MeetingVoiceBroadcast
-        MARKETING_VERSION: "0.4.7"
-        CURRENT_PROJECT_VERSION: "23"
+        MARKETING_VERSION: "0.4.8"
+        CURRENT_PROJECT_VERSION: "24"
         SWIFT_VERSION: "5.0"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         TARGETED_DEVICE_FAMILY: "1"
@@ -76,8 +76,8 @@ targets:
         CFBundleDisplayName: MeetingVoice
         # 必须写成带引号的字符串:YAML 会把 6 当数字,CFNetwork 拼 User-Agent 时
         # 拿到数字会抛异常直接 abort(实测崩溃栈:initializeUserAgentString)
-        CFBundleShortVersionString: "0.4.7"
-        CFBundleVersion: "23"
+        CFBundleShortVersionString: "0.4.8"
+        CFBundleVersion: "24"
         UILaunchScreen: {}
         # 锁屏/后台继续录音的关键:后台音频模式
         UIBackgroundModes:
@@ -89,8 +89,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.luanshijia.meetingvoice
         PRODUCT_NAME: MeetingVoice
-        MARKETING_VERSION: "0.4.7"
-        CURRENT_PROJECT_VERSION: "23"
+        MARKETING_VERSION: "0.4.8"
+        CURRENT_PROJECT_VERSION: "24"
         SWIFT_VERSION: "5.0"
         # 显式锁定:接 SwiftPM 依赖后产物 Info.plist 的 MinimumOSVersion 曾变成 13.0(依赖的声明下限),
         # 而代码用了 iOS 17 的 API —— 写死避免漂移。

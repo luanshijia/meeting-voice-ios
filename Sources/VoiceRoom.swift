@@ -9,11 +9,25 @@ final class VoiceRoom: NSObject {
 
     var onState: ((String) -> Void)?
     var onNote: ((String) -> Void)?
-    /// (类型 partial/final, 说话人, 服务端已识别的音频秒数, 文字)
-    var onTranscript: ((String, String, Double, String) -> Void)?
+    /// (类型 partial/final/summary, 说话人, 服务端已识别的音频秒数, 文字, 前面静了多久, 绝对时间戳)
+    /// gap 为 nil = 服务端没测出来(比如刚重连);ts 为 0 = 老服务端没给。
+    var onTranscript: ((String, String, Double, String, Double?, Double) -> Void)?
     var onEnded: ((String) -> Void)?
 
     var isConnected: Bool { room?.connectionState == .connected }
+
+    /// 往房间里发一条自己的数据消息(topic=stt,与 agent 回传同一条通道,可靠送达)。
+    /// 用途:「实时总结」按钮点一次 → 请家里立刻出一段总结。
+    func send(_ payload: [String: Any]) async {
+        guard let room, let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        do {
+            // 2.17.0 的 API 是 publish(data:options:);reliable=true 保证这条请求不丢
+            try await room.localParticipant.publish(data: data,
+                                                    options: DataPublishOptions(topic: "stt", reliable: true))
+        } catch {
+            onNote?("发消息失败:\(error.localizedDescription)")
+        }
+    }
 
     func connect(_ cfg: LiveKitConfig) async throws {
         guard let token = cfg.makeToken() else {
@@ -55,7 +69,9 @@ extension VoiceRoom: RoomDelegate {
                   let type = obj["type"] as? String, let text = obj["text"] as? String else { return }
             let who = (obj["who"] as? String) ?? "?"
             let audioS = (obj["audio_s"] as? Double) ?? 0
-            self.onTranscript?(type, who, audioS, text)
+            let gap = obj["gap_s"] as? Double          // JSON null / 老服务端缺字段 → nil
+            let ts = (obj["ts"] as? Double) ?? 0
+            self.onTranscript?(type, who, audioS, text, gap, ts)
         }
     }
 

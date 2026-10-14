@@ -5,6 +5,10 @@ struct TranscriptLine: Identifiable {
     let id = UUID()
     let who: String
     let text: String
+    /// 这句话开始前,同一路音频静了多久(秒)。nil = 服务端没测出来(刚重连的第一句)
+    var gap: Double? = nil
+    /// 服务端定稿的绝对时间(epoch 秒)。0 = 老服务端没给
+    var ts: Double = 0
 }
 
 @MainActor
@@ -16,6 +20,18 @@ final class SessionModel: ObservableObject {
     @Published var isRecording = false
     @Published var recordedSeconds: Double = 0     // 本地推流时长
     @Published var serverSeconds: Double = 0       // 家里已识别到的音频秒数(agent 回传)
+    @Published var summary = ""                    // 实时总结正文(agent 推 summary 消息时填)
+    @Published var summaryState = "待接入"          // 总结行右侧的小字:待接入 / 已请求… / 更新于
+
+    /// 「实时总结」按钮:点一次,请家里立刻出一段总结。
+    /// ⚠ 后端(站 4)还没接 —— 这条请求现在没人应答,小字会停在「已请求(后端未接入)」。
+    /// 按钮与协议先做到位,后端接上时手机不用再装一次包。
+    func requestSummary() {
+        guard isRecording else { return }
+        summaryState = "已请求(后端未接入)"
+        note("点了实时总结(请家里出一段)")
+        Task { await room.send(["type": "summary_request", "ts": Int(Date().timeIntervalSince1970)]) }
+    }
 
     var serverURL: String {
         get { cfg.url } set { cfg.url = newValue; cfg.save() }
@@ -39,7 +55,7 @@ final class SessionModel: ObservableObject {
     func resetToDefaults() {
         cfg = LiveKitConfig(url: LiveKitConfig.defaultURL, apiKey: LiveKitConfig.defaultKey,
                             apiSecret: LiveKitConfig.defaultSecret,
-                            identity: "iphone-\(Int.random(in: 1000...9999))")
+                            identity: LiveKitConfig.defaultIdentity)
         cfg.save()
         objectWillChange.send()
     }
@@ -61,11 +77,18 @@ final class SessionModel: ObservableObject {
             self.stopTimer()
             self.isRecording = false
         }
-        room.onTranscript = { [weak self] type, who, audioS, text in
+        room.onTranscript = { [weak self] type, who, audioS, text, gap, ts in
             guard let self else { return }
             self.serverSeconds = audioS          // 「收」= 家里已识别的音频秒数
+            if type == "summary" {               // 站 4 后端接上后,agent 会推这个类型过来
+                self.summary = text
+                self.summaryState = "更新于 \(Self.stamp())"
+                return
+            }
             if type == "final" {
-                if !text.isEmpty { self.lines.append(TranscriptLine(who: who, text: text)) }
+                if !text.isEmpty {
+                    self.lines.append(TranscriptLine(who: who, text: text, gap: gap, ts: ts))
+                }
                 self.partial = ""
                 self.partialWho = ""
             } else {

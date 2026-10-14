@@ -17,7 +17,7 @@ struct ContentView: View {
     @State private var netOK: Bool? = nil            // nil = 还没测过
     @State private var broadcastAlive = false        // 扩展写过「=== 扩展启动」且没写「结束」
     @State private var broadcastMicFrames = 0        // 扩展记下的麦克风采样帧数
-    @State private var summaryText = ""              // 实时总结(站 4 后端接入前为空)
+    // 实时总结的文本与状态改由 SessionModel 持有(agent 推 summary 消息时由它填)
 
     var body: some View {
         VStack(spacing: 6) {
@@ -59,25 +59,21 @@ struct ContentView: View {
 
     /// 网络:只有显示功能。点了当场测一次;启动和回到前台也会自动测。
     private var netButton: some View {
-        Button {
+        flatButton(icon: netOK == true ? "wifi" : "wifi.slash", title: "网络",
+                   fill: (netOK == true ? Color.blue : Color.gray).opacity(0.18),
+                   fg: netOK == true ? Color.blue : Color.gray) {
             Task { await refreshNet() }
-        } label: {
-            buttonLabel(icon: netOK == true ? "wifi" : "wifi.slash", title: "网络")
         }
-        .buttonStyle(.bordered)
-        .tint(netOK == true ? Color.blue : Color.gray)
     }
 
     /// 开启 / 停止:切换状态
     private var recordButton: some View {
-        Button {
+        flatButton(icon: model.isRecording ? "stop.circle.fill" : "record.circle",
+                   title: model.isRecording ? "停止" : "开启",
+                   fill: model.isRecording ? Color.red : Color.accentColor,
+                   fg: .white) {
             model.toggle()
-        } label: {
-            buttonLabel(icon: model.isRecording ? "stop.circle.fill" : "record.circle",
-                        title: model.isRecording ? "停止" : "开启")
         }
-        .buttonStyle(.borderedProminent)
-        .tint(model.isRecording ? Color.red : Color.accentColor)
     }
 
     /// 扩展:点它调出系统直播选择器。
@@ -92,7 +88,8 @@ struct ContentView: View {
             Button {
                 BroadcastPickerTrigger.open()
             } label: {
-                buttonLabel(icon: "dot.radiowaves.left.and.right", title: extTitle, onDark: broadcastAlive)
+                buttonLabel(icon: "dot.radiowaves.left.and.right", title: extTitle,
+                            fg: broadcastAlive ? .white : .primary)
                     .background(
                         RoundedRectangle(cornerRadius: 7).fill(extFill)
                     )
@@ -113,24 +110,34 @@ struct ContentView: View {
     }
 
     private var settingsButton: some View {
-        Button {
+        flatButton(icon: "gearshape", title: "设置",
+                   fill: Color.blue.opacity(0.18), fg: .blue) {
             showSettings = true
-        } label: {
-            buttonLabel(icon: "gearshape", title: "设置")
         }
-        .buttonStyle(.bordered)
-        .tint(.blue)
     }
 
-    /// onDark:底色是红/蓝这种深色时用白字,底色是灰时用默认前景色
-    private func buttonLabel(icon: String, title: String, onDark: Bool = false) -> some View {
+    /// 四个按钮共用的标签几何:图标 + 小字,块高固定 34(就是「扩展」那块的高度)。
+    /// fg:文字/图标颜色,由调用处按状态给(灰/蓝/红/白)。
+    private func buttonLabel(icon: String, title: String, fg: Color = .primary) -> some View {
         VStack(spacing: 1) {
             Image(systemName: icon).font(.system(size: 14))
             Text(title).font(.system(size: 10, weight: .semibold))
         }
-        .foregroundStyle(onDark ? Color.white : Color.primary)
+        .foregroundStyle(fg)
         .frame(maxWidth: .infinity)
         .frame(height: 34)
+    }
+
+    /// 自绘的四等分按钮:整块圆角底色、块高与「扩展」完全一致。
+    /// 为什么不用系统 .bordered/.borderedProminent:系统会在内容上下各加一圈内边距,
+    /// 「网络/开启/设置」比「扩展」高出一截 —— 一行按钮高低不齐还白占屏幕(用户实测反馈)。
+    private func flatButton(icon: String, title: String, fill: Color, fg: Color,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            buttonLabel(icon: icon, title: title, fg: fg)
+                .background(RoundedRectangle(cornerRadius: 7).fill(fill))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - 状态行(短文字 + 三个数)
@@ -164,22 +171,36 @@ struct ContentView: View {
         }
     }
 
+    /// 下 1/3:实时总结。标题行右侧的「总结」按钮 = 手动点一次,请家里立刻出一段。
+    /// ⚠ 后端(站 4)还没接:点了没人应答,小字会停在「已请求(后端未接入)」。
+    /// 按钮先做到位,是为了后端接上时手机不用再装一次包。
     private var summaryPane: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 Text("实时总结").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
-                Spacer()
-                if summaryText.isEmpty {
-                    Text("待接入").font(.system(size: 9)).foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                Text(model.summaryState).font(.system(size: 9)).foregroundStyle(.secondary)
+                Button {
+                    model.requestSummary()
+                } label: {
+                    Text("总结")
+                        .font(.system(size: 11, weight: .semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.blue.opacity(model.isRecording ? 0.18 : 0.08)))
+                        .foregroundStyle(model.isRecording ? Color.blue : Color.secondary)
                 }
+                .buttonStyle(.plain)
+                .disabled(!model.isRecording)          // 没在记录 → 没内容可总结
             }
             ScrollView {
-                Text(summaryText.isEmpty
+                Text(model.summary.isEmpty
                      ? "（这一段以后会显示滚动总结:每 30 秒把新增的转写压成几条要点。总结后端还没接入,先占位。）"
-                     : summaryText)
+                     : model.summary)
                     .font(.system(size: 14))
                     .lineSpacing(4)
-                    .foregroundStyle(summaryText.isEmpty ? .secondary : .primary)
+                    .foregroundStyle(model.summary.isEmpty ? .secondary : .primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
             }
@@ -188,13 +209,25 @@ struct ContentView: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.08)))
     }
 
+    /// 转写区。渲染规则(用户口径):
+    ///   ① 换人就换段 —— 说话人名字只在他换人时出现一次;
+    ///   ② 同一人两段之间静音 ≥2.4 秒 → 中间插一行 ~~~(超 30 秒带时长);
+    ///   ③ 同一人一口气说很久 → 按标点换行(约 100 字一段)。
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    ForEach(Array(model.lines.enumerated()), id: \.element.id) { idx, line in
-                        paragraph(who: line.who, text: line.text, color: .primary)
-                            .id(idx)
+                    ForEach(displayRows) { row in
+                        if row.isGap {
+                            Text(row.text)
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .id(row.id)
+                        } else {
+                            paragraph(who: row.who, text: row.text, color: .primary)
+                                .id(row.id)
+                        }
                     }
                     if !model.partial.isEmpty {
                         paragraph(who: model.partialWho, text: model.partial, color: .blue)
@@ -207,11 +240,68 @@ struct ContentView: View {
                 guard !newValue.isEmpty else { return }
                 proxy.scrollTo("partial", anchor: .bottom)
             }
-            .onChange(of: model.lines.count) { _, newValue in
-                guard newValue > 0 else { return }
-                proxy.scrollTo(newValue - 1, anchor: .bottom)
+            .onChange(of: model.lines.count) { _, _ in
+                guard let last = displayRows.last else { return }
+                proxy.scrollTo(last.id, anchor: .bottom)
             }
         }
+    }
+
+    // MARK: - 转写渲染(分人 / 停顿 / 超长换行)
+
+    /// 界面上的一行:要么是一段转写,要么是一行停顿符号 ~~~。
+    private struct DisplayRow: Identifiable {
+        let id: String
+        let who: String        // 空 = 不是转写段(~~~ 行)
+        let text: String
+        let isGap: Bool
+    }
+
+    /// 静音超过这么久,才在同一人的两段之间显示 ~~~(沿用家里断句阈值 2.4 秒)
+    private static let gapThreshold: Double = 2.4
+
+    private var displayRows: [DisplayRow] {
+        var rows: [DisplayRow] = []
+        var prevWho = ""
+        for (idx, line) in model.lines.enumerated() {
+            let sameSpeaker = (line.who == prevWho)
+            if sameSpeaker, let gap = line.gap, gap >= Self.gapThreshold {
+                rows.append(DisplayRow(id: "gap-\(idx)", who: "", text: Self.gapLabel(gap), isGap: true))
+            }
+            rows.append(DisplayRow(id: "line-\(idx)", who: sameSpeaker ? "" : line.who,
+                                   text: Self.wrap(line.text), isGap: false))
+            prevWho = line.who
+        }
+        return rows
+    }
+
+    /// ~~~ 的文案:超过 30 秒带上时长(用户口径),否则就一个 ~~~。
+    private static func gapLabel(_ seconds: Double) -> String {
+        guard seconds >= 30 else { return "~~~" }
+        let total = Int(seconds.rounded())
+        let m = total / 60
+        let s = total % 60
+        return s == 0 ? "~~~ \(m)分钟" : "~~~ \(m)分\(s)秒"
+    }
+
+    /// 同一人一口气说很久时,按标点换行,手机上一眼能读完(约 100 字一段)。
+    /// 只插换行符、不拆成多段 —— 视觉上仍是一段话。
+    private static func wrap(_ text: String, limit: Int = 100) -> String {
+        guard text.count > limit else { return text }
+        var out = ""
+        var sinceBreak = 0
+        for ch in text {
+            out.append(ch)
+            sinceBreak += 1
+            if sinceBreak >= limit {
+                out.append("\n")
+                sinceBreak = 0
+            } else if sinceBreak >= limit - 20, "，。！？；、".contains(ch) {
+                out.append("\n")
+                sinceBreak = 0
+            }
+        }
+        return out
     }
 
     private func paragraph(who: String, text: String, color: Color) -> some View {

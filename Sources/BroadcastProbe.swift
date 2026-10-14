@@ -39,6 +39,15 @@ enum BroadcastProbe {
         return "可用 → \(matchedGroup ?? "?")"
     }
 
+    /// 设置页那一行只显示【组名】:「可用 → 」三个字删掉(用户实测反馈:太占地方),
+    /// 可用性交给颜色表达 —— 绿 = 可用,红 = 不可用。
+    static func groupName() -> String {
+        guard containerURL() != nil else {
+            return "不可用(候选名都没命中)"
+        }
+        return matchedGroup ?? "?"
+    }
+
     static func readLog(maxLines: Int = 60) -> String {
         guard let url = containerURL()?.appendingPathComponent(fileName),
               let text = try? String(contentsOf: url, encoding: .utf8) else {
@@ -136,12 +145,20 @@ struct ProbeSection: View {
 
     var body: some View {
         Section {
-            HStack {
+            // 一行放下(用户实测反馈:原来「可用 → 组名」太长,折成了两行)。
+            // 「可用 / 不可用」交给颜色说:绿 = 可用,红 = 不可用,省下的宽度全给组名。
+            HStack(spacing: 6) {
                 Text("App Group")
-                Spacer()
-                Text(BroadcastProbe.groupStatus())
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(BroadcastProbe.containerURL() == nil ? .red : .green)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .layoutPriority(1)
+                Spacer(minLength: 4)
+                Text(BroadcastProbe.groupName())
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(BroadcastProbe.containerURL() == nil ? Color.red : Color.green)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .truncationMode(.middle)
             }
             HStack {
                 Text("扩展")
