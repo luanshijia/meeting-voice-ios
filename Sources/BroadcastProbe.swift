@@ -107,9 +107,27 @@ struct BroadcastPickerView: UIViewRepresentable {
         let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
         picker.preferredExtension = BroadcastProbe.extensionBundleID
         picker.showsMicrophoneButton = true
+        BroadcastPickerTrigger.picker = picker       // 交给 BroadcastPickerTrigger 程序触发
         return picker
     }
     func updateUIView(_ uiView: RPSystemBroadcastPickerView, context: Context) {}
+}
+
+/// 程序化打开系统直播选择器。
+/// 为什么要绕这一下:系统只给 RPSystemBroadcastPickerView 这个「自带外观的按钮」,外观不可改。
+/// 早先的做法是把它透明地盖在自己画的按钮上 —— build 22 真机实测「点不动」。
+/// 现在改成:它藏在最底层(1% 透明),我们自己的按钮调用 open() 去点它内部真正的 UIButton。
+enum BroadcastPickerTrigger {
+    static weak var picker: RPSystemBroadcastPickerView?
+    static func open() {
+        guard let picker else { return }
+        for sub in picker.subviews {
+            if let button = sub as? UIButton {
+                button.sendActions(for: .touchUpInside)
+                return
+            }
+        }
+    }
 }
 
 struct ProbeSection: View {

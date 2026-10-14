@@ -21,10 +21,10 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            statusRow                                  // 状态文字(如「已连上房间」)+ 三个数,放最上面
-            buttonRow
+            header
             paneSplit
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)   // 顶部区块贴顶,不吸走空白
         .padding(.horizontal, 12)
         .padding(.top, 4)
         .padding(.bottom, 6)
@@ -33,6 +33,17 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await refreshExt(); await refreshNet() } }
         }
+    }
+
+    /// 顶部固定区块:状态行 + 四个按钮。
+    /// fixedSize(vertical) 让它严格按内容高度排布 —— 之前它会被下面的自适应区域挤压,
+    /// 表现成「状态行和按钮行之间空出一大段」(用户实测反馈)。
+    private var header: some View {
+        VStack(spacing: 6) {
+            statusRow
+            buttonRow
+        }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - 顶部四个按钮(一行,等宽)
@@ -74,14 +85,19 @@ struct ContentView: View {
     /// 为什么只能猜:系统那个「麦克风」开关的状态 App 读不到(iOS 没给接口),只能靠扩展有没有收到音频反推。
     private var extButton: some View {
         ZStack {
-            buttonLabel(icon: "dot.radiowaves.left.and.right", title: extTitle, onDark: broadcastAlive)
-                .background(
-                    RoundedRectangle(cornerRadius: 7).fill(extFill)
-                )
-            // 系统组件盖在上面:看得见的是我们画的按钮,点得到的是它(它自己会弹选择器)
+            // 系统组件藏到最底层(1% 透明):它的外观不能改,只负责被下面那个按钮程序触发
             BroadcastPickerView()
-                .frame(maxWidth: .infinity, minHeight: 34)
-                .opacity(0.02)
+                .frame(width: 44, height: 44)
+                .opacity(0.01)
+            Button {
+                BroadcastPickerTrigger.open()
+            } label: {
+                buttonLabel(icon: "dot.radiowaves.left.and.right", title: extTitle, onDark: broadcastAlive)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7).fill(extFill)
+                    )
+            }
+            .buttonStyle(.plain)                      // 整块底色都算点击区
         }
     }
 
