@@ -51,7 +51,7 @@ enum BroadcastProbe {
     static func readLog(maxLines: Int = 60) -> String {
         guard let url = containerURL()?.appendingPathComponent(fileName),
               let text = try? String(contentsOf: url, encoding: .utf8) else {
-            return "(还没有探针日志:扩展从未启动过,或 App Group 不可用)"
+            return ""          // 没日志就是空字符串(以前返回一句「扩展从未启动过…」的猜测,已删)
         }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         return lines.suffix(maxLines).joined(separator: "\n")
@@ -139,54 +139,73 @@ enum BroadcastPickerTrigger {
     }
 }
 
-struct ProbeSection: View {
+struct AppGroupRow: View {
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("App Group")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .layoutPriority(1)
+            Spacer(minLength: 4)
+            Text(BroadcastProbe.groupName())
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(BroadcastProbe.containerURL() == nil ? Color.red : Color.green)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .truncationMode(.middle)
+        }
+    }
+}
+
+/// 扩展那一行:显示 appex 的 bundle id,字体与颜色跟上一行 App Group 完全一致(用户口径)
+struct ExtensionRow: View {
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("扩展")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .layoutPriority(1)
+            Spacer(minLength: 4)
+            Text(BroadcastProbe.extensionBundleID)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(BroadcastProbe.containerURL() == nil ? Color.red : Color.green)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .truncationMode(.middle)
+        }
+    }
+}
+
+/// 扩展日志(会长/要滚 → 按用户口径放在设置页下方)。没日志时整块不显示
+/// (以前那句「还没有探针日志:扩展从未启动过,或 App Group 不可用」已失效,按要求删掉)
+struct ExtLogSection: View {
     @State private var logText = ""
     @State private var refreshedAt = ""
 
     var body: some View {
         Section {
-            // 一行放下(用户实测反馈:原来「可用 → 组名」太长,折成了两行)。
-            // 「可用 / 不可用」交给颜色说:绿 = 可用,红 = 不可用,省下的宽度全给组名。
-            HStack(spacing: 6) {
-                Text("App Group")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .layoutPriority(1)
-                Spacer(minLength: 4)
-                Text(BroadcastProbe.groupName())
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(BroadcastProbe.containerURL() == nil ? Color.red : Color.green)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .truncationMode(.middle)
-            }
-            HStack {
-                Text("扩展")
-                Spacer()
-                Text(BroadcastProbe.extensionBundleID)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
+            if !logText.isEmpty {
+                ScrollView {
+                    Text(logText)
+                        .font(.system(size: 10, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .frame(maxHeight: 240)
             }
             HStack(spacing: 12) {
-                Button("刷新日志") { load() }
+                Button("刷新") { load() }
                 Spacer()
-                Button("清空日志") { BroadcastProbe.clearLog(); load() }
+                Button("清空") { BroadcastProbe.clearLog(); load() }
                     .foregroundStyle(.red)
             }
             if !refreshedAt.isEmpty {
                 Text(refreshedAt).font(.system(size: 10)).foregroundStyle(.secondary)
             }
-            ScrollView {
-                Text(logText)
-                    .font(.system(size: 10, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-            }
-            .frame(maxHeight: 240)
         } header: {
-            Text("广播扩展探针(阶段二)")
+            Text("扩展日志")
         } footer: {
-            Text("三条回信道:①「对方的声音」用 https 每 0.5 秒一块发回家里的 /ingest(5A,这是分人的关键);②App Group 共享文件(主 App 读回日志);③每 3 秒把计数发到家里 /probe(不依赖 App Group 的保底诊断)。三种失败要分开看:①侧载装不上=免费自签不支持带扩展的包;②App Group 显示不可用=entitlement 没被签进来;③可用但日志为空=扩展没被启动或没收到音频。")
+            Text("扩展每 3 秒写一行:计数、采样格式、App Group 组名、5A(对方声音)发送状态。主界面「扩展」按钮的三色判断也读这份文件。")
         }
         .onAppear { load() }
     }

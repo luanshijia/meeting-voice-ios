@@ -21,29 +21,20 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            header
+            buttonRow                       // 顶部只剩四个按钮(状态行搬到屏幕最下方)
             paneSplit
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)   // 顶部区块贴顶,不吸走空白
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.horizontal, 12)
         .padding(.top, 4)
-        .padding(.bottom, 6)
+        // 状态 + 录/收/句 钉在屏幕最下方:占的是系统本来留给 home 指示条的那条空白带,
+        // 等于白捡一行高度 —— 上面 2/3 转写和 1/3 总结各多占几十点。
+        .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
         .sheet(isPresented: $showSettings) { SettingsSheet(model: model) }
         .task { await refreshLoop() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await refreshExt(); await refreshNet() } }
         }
-    }
-
-    /// 顶部固定区块:状态行 + 四个按钮。
-    /// fixedSize(vertical) 让它严格按内容高度排布 —— 之前它会被下面的自适应区域挤压,
-    /// 表现成「状态行和按钮行之间空出一大段」(用户实测反馈)。
-    private var header: some View {
-        VStack(spacing: 6) {
-            statusRow
-            buttonRow
-        }
-        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - 顶部四个按钮(一行,等宽)
@@ -140,22 +131,42 @@ struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - 状态行(短文字 + 三个数)
+    // MARK: - 屏幕最下方一行(状态 + 三个数)
 
-    private var statusRow: some View {
+    /// 一行放完全部:左边状态文字、右边「录 12 收 12 句 3」。
+    /// 两处细节(用户口径):① 数字不再压成上下两行;② 底色一路铺到屏幕底边(绕开安全区),
+    /// 视觉上就是贴着屏幕圆角底边的一道,而不是浮在中间的一条。
+    private var bottomBar: some View {
         HStack(spacing: 8) {
             Text(model.status)
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            Spacer(minLength: 4)
-            HStack(spacing: 8) {
-                metric("录", model.recordedSeconds, .primary)
-                metric("收", model.serverSeconds,
-                       (model.recordedSeconds - model.serverSeconds) > 5 ? .red : .green)
-                metric("句", Double(model.lines.count), .primary)
-            }
+                .truncationMode(.tail)
+            Spacer(minLength: 6)
+            inlineMetric("录", model.recordedSeconds, .primary)
+            inlineMetric("收", model.serverSeconds,
+                         (model.recordedSeconds - model.serverSeconds) > 5 ? .red : .green)
+            inlineMetric("句", Double(model.lines.count), .primary)
         }
+        .padding(.horizontal, 12)
+        .padding(.top, 3)
+        .padding(.bottom, 1)
+        .background(
+            Rectangle().fill(.bar).ignoresSafeArea(edges: .bottom)
+        )
+    }
+
+    /// 「标签 + 数字」横向排(以前是标签一行、数字一行,占两行高度)
+    private func inlineMetric(_ label: String, _ value: Double, _ color: Color) -> some View {
+        HStack(spacing: 3) {
+            Text(label).font(.system(size: 9)).foregroundStyle(.secondary)
+            Text(value > 0 ? String(format: "%.0f", value) : "—")
+                .font(.system(size: 11, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(color)
+        }
+        .fixedSize()
     }
 
     // MARK: - 版面:上 2/3 转写,下 1/3 总结
@@ -317,17 +328,6 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func metric(_ label: String, _ value: Double, _ color: Color) -> some View {
-        VStack(spacing: -1) {
-            Text(label).font(.system(size: 9)).foregroundStyle(.secondary)
-            Text(value > 0 ? String(format: "%.0f", value) : "—")
-                .font(.system(size: 12, weight: .medium))
-                .monospacedDigit()
-                .foregroundStyle(color)
-        }
-        .frame(width: 28)
-    }
-
     // MARK: - 刷新
 
     private func refreshExt() async {
@@ -362,12 +362,12 @@ struct SettingsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                connectionSection
-                ProbeSection()
-                logSection
-                crashSection
+                stateSection          // 固定信息(环境 / 身份 / 版本)—— 按用户口径放最上面
+                connectionSection     // 固定(可编辑)
+                copySection           // 固定(一个按钮)
+                ExtLogSection()       // 会长/要滚的全部集中在下面
                 stepsSection
-                versionSection
+                crashSection          // 有才显示
             }
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
@@ -379,7 +379,7 @@ struct SettingsSheet: View {
 
     private var connectionSection: some View {
         Section {
-            TextField("ws://100.64.0.2:7880", text: $model.serverURL)
+            TextField("wss://100.64.0.2:7443", text: $model.serverURL)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .keyboardType(.URL)
@@ -392,51 +392,47 @@ struct SettingsSheet: View {
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .font(.system(size: 14, design: .monospaced))
-            HStack {
-                Text("身份").foregroundStyle(.secondary)
-                Spacer()
-                Text(model.identity).font(.system(size: 13, design: .monospaced))
-            }
             Button("恢复默认连接参数") { model.resetToDefaults() }
         } header: {
             Text("连接参数")
         } footer: {
-            Text("开发模式:密钥存在 App 内,对应家里 livekit-server --dev。仅内网测试用,正式版应改成服务端发 token。")
+            Text("地址填家里的 TLS 代理 wss://100.64.0.2:7443。开发模式:key/secret 存在 App 内(对应家里的 livekit-server --dev),正式版应改成服务端发 token。")
         }
     }
 
-    /// 记录日志 + 排错:一键把连接参数和探针日志复制出来,直接贴回来或存档
-    private var logSection: some View {
+    /// 排错:一个按钮把「连接参数 + 状态 + 环境 + 扩展日志」一次复制走。
+    /// (以前是两个按钮——「复制探针日志」与「复制全套排错信息」,信息还重叠,已并成一个。)
+    private var copySection: some View {
         Section {
             Button {
-                let log = BroadcastProbe.fullLogText()
-                UIPasteboard.general.string = log
-                copiedAt = log.isEmpty ? "没有日志可复制(扩展没启动过?)" : "已复制 \(log.count) 字符"
+                UIPasteboard.general.string = debugBundle
+                copiedAt = "已复制 \(debugBundle.count) 字符(连接参数 + 状态 + 环境 + 扩展日志)"
             } label: {
-                Label("复制探针日志", systemImage: "doc.on.doc")
-            }
-            Button {
-                let bundle = """
-                server=\(model.serverURL)
-                identity=\(model.identity)
-                status=\(model.status)
-                录=\(Int(model.recordedSeconds)) 收=\(Int(model.serverSeconds)) 句=\(model.lines.count)
-
-                \(BroadcastProbe.fullLogText())
-                """
-                UIPasteboard.general.string = bundle
-                copiedAt = "已复制(连接参数 + 状态 + 日志)"
-            } label: {
-                Label("复制全套排错信息", systemImage: "square.and.arrow.up")
+                Label("复制排错信息", systemImage: "square.and.arrow.up")
             }
             if !copiedAt.isEmpty {
                 Text(copiedAt).font(.system(size: 11)).foregroundStyle(.secondary)
             }
         } header: {
-            Text("日志与排错")
+            Text("排错")
         } footer: {
-            Text("排错顺序:①「网络」按钮看路通不通;②「扩展」按钮看扩展起没起、麦克风有没有在收(灰/蓝/红三态);③在这里复制日志贴回来。")
+            Text("顺序:①「网络」按钮看路通不通;②「扩展」按钮看扩展起没起、麦克风有没有在收(灰/蓝/红三态);③点这里复制,贴回来给我。")
         }
+    }
+
+    /// 复制走的内容:一眼能看全「这台手机现在是什么状态」
+    private var debugBundle: String {
+        """
+        server=\(model.serverURL)
+        identity=\(model.identity)
+        status=\(model.status)
+        录=\(Int(model.recordedSeconds)) 收=\(Int(model.serverSeconds)) 句=\(model.lines.count)
+        App Group=\(BroadcastProbe.groupName())
+        扩展=\(BroadcastProbe.extensionBundleID)
+        version=\(appVersion)
+
+        \(BroadcastProbe.fullLogText())
+        """
     }
 
     @ViewBuilder private var crashSection: some View {
@@ -461,13 +457,41 @@ struct SettingsSheet: View {
         }
     }
 
-    private var versionSection: some View {
+    // MARK: - 状态段(全固定 → 放设置页最上面)
+
+    private var stateSection: some View {
         Section {
-            // 从包里读真版本,别再写死(以前写死的 "build 12" 会误导排查)
-            Text("v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") · build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?")")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            AppGroupRow()
+            ExtensionRow()
+            valueRow("身份", model.identity)
+            valueRow("版本", appVersion)
+        } header: {
+            Text("状态")
         }
+    }
+
+    /// 值那一列统一款式:等宽小字 + 绿色,与 App Group / 扩展 两行完全一致
+    private func valueRow(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .layoutPriority(1)
+            Spacer(minLength: 4)
+            Text(value)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.green)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .truncationMode(.middle)
+        }
+    }
+
+    /// 版本从包里读真值(以前写死 "build 12",排查时会误导)
+    private var appVersion: String {
+        let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let b = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        return "v\(v) · build \(b)"
     }
 }
 
