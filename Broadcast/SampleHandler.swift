@@ -114,7 +114,12 @@ final class SampleHandler: RPBroadcastSampleHandler {
         report("start")                                  // 立刻发一次:哪怕零音频,也能证明"扩展活着 + 能连上家里"
         let t = DispatchSource.makeTimerSource(queue: .global())
         t.schedule(deadline: .now() + 3, repeating: 3)
-        t.setEventHandler { [weak self] in self?.report("tick") }
+        t.setEventHandler { [weak self] in
+            // 每 3 秒也往共享文件写一行本地状态:主 App 靠它判断「有没有收到麦克风输入」,
+            // 从而决定界面上那个「扩展」按钮是蓝(不确定)还是红(确定)。
+            self?.flush()
+            self?.report("tick")
+        }
         t.resume()
         ticker = t
     }

@@ -1,105 +1,173 @@
 import SwiftUI
+import UIKit
 
-/// 主界面(阶段三最小版):没有大标题、网址收进"设置"、转写按阅读排版。
-/// 三个数字:录(本地推流秒数)/ 收(家里已识别的秒数,agent 回传)/ 句(定稿句数)。
+/// 主界面(阶段三)。
+/// 顶部一行四个按钮,颜色当指示灯用:
+///   网络 = 能不能连上家里(蓝=通 / 灰=不通或没测)
+///   开启 = 录音开关(红=录着)
+///   扩展 = 系统直播三态(灰=确定没开播 / 蓝=已开播但没看到麦克风输入,是猜的 / 红=确定收到麦克风输入)
+///   设置 = 连接参数、日志排错、黑匣子
+/// 下面:上 2/3 滚动字幕,下 1/3 实时总结(后端待接入,先留位)。
 struct ContentView: View {
     @StateObject private var model = SessionModel()
     @State private var showSettings = false
-    @State private var broadcastAlive = false        // 直播是否在进行(扩展每 3 秒写一次共享文件)
+    @Environment(\.scenePhase) private var scenePhase
+
+    // 顶部按钮状态
+    @State private var netOK: Bool? = nil            // nil = 还没测过
+    @State private var broadcastAlive = false        // 扩展写过「=== 扩展启动」且没写「结束」
+    @State private var broadcastMicFrames = 0        // 扩展记下的麦克风采样帧数
+    @State private var summaryText = ""              // 实时总结(站 4 后端接入前为空)
 
     var body: some View {
-        VStack(spacing: 8) {
-            header
-            controlRow
-            hintRow
-            transcript
+        VStack(spacing: 6) {
+            buttonRow
+            statusRow
+            paneSplit
         }
-        .padding(.horizontal, 14)
-        .padding(.bottom, 8)
+        .padding(.horizontal, 12)
+        .padding(.top, 4)
+        .padding(.bottom, 6)
         .sheet(isPresented: $showSettings) { SettingsSheet(model: model) }
-        .task {
-            while !Task.isCancelled {                 // 每 3 秒问一次扩展还活着没,红点跟着变
-                broadcastAlive = BroadcastProbe.isBroadcasting()
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-            }
+        .task { await refreshLoop() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await refreshExt(); await refreshNet() } }
         }
     }
 
-    private var header: some View {
-        HStack(alignment: .center, spacing: 8) {
-            Text(model.status)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+    // MARK: - 顶部四个按钮(一行,等宽)
 
-            HStack(spacing: 10) {
+    private var buttonRow: some View {
+        HStack(spacing: 6) {
+            netButton
+            recordButton
+            extButton
+            settingsButton
+        }
+    }
+
+    /// 网络:只有显示功能。点了当场测一次;启动和回到前台也会自动测。
+    private var netButton: some View {
+        Button {
+            Task { await refreshNet() }
+        } label: {
+            buttonLabel(icon: netOK == true ? "wifi" : "wifi.slash", title: "网络")
+        }
+        .buttonStyle(.bordered)
+        .tint(netOK == true ? Color.blue : Color.gray)
+    }
+
+    /// 开启 / 停止:切换状态
+    private var recordButton: some View {
+        Button {
+            model.toggle()
+        } label: {
+            buttonLabel(icon: model.isRecording ? "stop.circle.fill" : "record.circle",
+                        title: model.isRecording ? "停止" : "开启")
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(model.isRecording ? Color.red : Color.accentColor)
+    }
+
+    /// 扩展:点它调出系统直播选择器。
+    /// 三态颜色:灰=确定没开播;蓝=已开播但还没看到麦克风输入(不确定,是猜的);红=确定收到麦克风输入。
+    /// 为什么只能猜:系统那个「麦克风」开关的状态 App 读不到(iOS 没给接口),只能靠扩展有没有收到音频反推。
+    private var extButton: some View {
+        ZStack {
+            buttonLabel(icon: "dot.radiowaves.left.and.right", title: extTitle)
+                .background(
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(extColor, lineWidth: 1.5)
+                )
+            // 系统组件盖在上面:看得见的是我们画的按钮,点得到的是它(它自己会弹选择器)
+            BroadcastPickerView()
+                .frame(maxWidth: .infinity, minHeight: 34)
+                .opacity(0.02)
+        }
+    }
+
+    private var extTitle: String {
+        if !broadcastAlive { return "扩展" }
+        return broadcastMicFrames > 0 ? "扩展·收" : "扩展·?"
+    }
+
+    private var extColor: Color {
+        if !broadcastAlive { return .gray }
+        return broadcastMicFrames > 0 ? .red : .blue
+    }
+
+    private var settingsButton: some View {
+        Button {
+            showSettings = true
+        } label: {
+            buttonLabel(icon: "gearshape", title: "设置")
+        }
+        .buttonStyle(.bordered)
+        .tint(.gray)
+    }
+
+    private func buttonLabel(icon: String, title: String) -> some View {
+        VStack(spacing: 1) {
+            Image(systemName: icon).font(.system(size: 14))
+            Text(title).font(.system(size: 10, weight: .semibold))
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 34)
+    }
+
+    // MARK: - 状态行(短文字 + 三个数)
+
+    private var statusRow: some View {
+        HStack(spacing: 8) {
+            Text(model.status)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            HStack(spacing: 8) {
                 metric("录", model.recordedSeconds, .primary)
                 metric("收", model.serverSeconds,
                        (model.recordedSeconds - model.serverSeconds) > 5 ? .red : .green)
                 metric("句", Double(model.lines.count), .primary)
             }
+        }
+    }
 
-            Button { showSettings = true } label: {
-                Image(systemName: "gearshape").font(.system(size: 17))
+    // MARK: - 版面:上 2/3 转写,下 1/3 总结
+
+    private var paneSplit: some View {
+        GeometryReader { geo in
+            let gap: CGFloat = 8
+            let total = geo.size.height
+            VStack(spacing: gap) {
+                transcript.frame(height: max(90, (total - gap) * 2 / 3))
+                summaryPane.frame(height: max(60, (total - gap) / 3))
             }
         }
-        .padding(.top, 4)
     }
 
-    private var controlRow: some View {
-        HStack(spacing: 10) {
-            recordButton
-            liveButton
-        }
-    }
-
-    /// 开启 / 停止(原来叫"开始录音")
-    private var recordButton: some View {
-        Button {
-            model.toggle()
-        } label: {
-            Label(model.isRecording ? "停止" : "开启",
-                  systemImage: model.isRecording ? "stop.circle.fill" : "record.circle")
-                .frame(maxWidth: .infinity)
-                .font(.title3.weight(.semibold))
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(model.isRecording ? .red : .accentColor)
-        .controlSize(.large)
-    }
-
-    /// 直播(原先在"探针页"里的红点):同一行,不用再切页
-    private var liveButton: some View {
-        HStack(spacing: 6) {
-            BroadcastPickerView()
-                .frame(width: 30, height: 30)
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(broadcastAlive ? Color.red : Color.secondary.opacity(0.6))
-                        .frame(width: 9, height: 9)
-                    Text(broadcastAlive ? "直播中" : "直播")
-                        .font(.system(size: 13, weight: .semibold))
+    private var summaryPane: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text("实时总结").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                Spacer()
+                if summaryText.isEmpty {
+                    Text("待接入").font(.system(size: 9)).foregroundStyle(.secondary)
                 }
-                Text(broadcastAlive ? "对方声音在传" : "点图标开启")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
+            }
+            ScrollView {
+                Text(summaryText.isEmpty
+                     ? "（这一段以后会显示滚动总结:每 30 秒把新增的转写压成几条要点。总结后端还没接入,先占位。）"
+                     : summaryText)
+                    .font(.system(size: 14))
+                    .lineSpacing(4)
+                    .foregroundStyle(summaryText.isEmpty ? .secondary : .primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(broadcastAlive ? Color.red : Color.secondary.opacity(0.5), lineWidth: 1)
-        )
-    }
-
-    private var hintRow: some View {
-        Text("先点「开启」录音,再点右侧图标 → 选 MeetingVoice(别用系统录屏)")
-            .font(.system(size: 10))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.08)))
     }
 
     private var transcript: some View {
@@ -131,11 +199,11 @@ struct ContentView: View {
     private func paragraph(who: String, text: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             if !who.isEmpty {
-                Text(who).font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(who).font(.system(size: 10)).foregroundStyle(.secondary)
             }
             Text(text)
-                .font(.system(size: 20))
-                .lineSpacing(8)
+                .font(.system(size: 17))
+                .lineSpacing(6)
                 .foregroundStyle(color)
                 .textSelection(.enabled)
         }
@@ -146,11 +214,35 @@ struct ContentView: View {
         VStack(spacing: -1) {
             Text(label).font(.system(size: 9)).foregroundStyle(.secondary)
             Text(value > 0 ? String(format: "%.0f", value) : "—")
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .monospacedDigit()
                 .foregroundStyle(color)
         }
-        .frame(width: 30)
+        .frame(width: 28)
+    }
+
+    // MARK: - 刷新
+
+    private func refreshExt() async {
+        broadcastAlive = BroadcastProbe.isBroadcasting()
+        broadcastMicFrames = BroadcastProbe.micFramesSeen()
+    }
+
+    private func refreshNet() async {
+        guard let hp = NetProbe.hostPort(from: model.serverURL) else { netOK = false; return }
+        netOK = await NetProbe.check(host: hp.host, port: hp.port)
+    }
+
+    private func refreshLoop() async {
+        await refreshExt()
+        await refreshNet()
+        var tick = 0
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)   // 每 3 秒看一次扩展状态
+            await refreshExt()
+            tick += 1
+            if tick % 5 == 0 { await refreshNet() }             // 每 15 秒顺手探一次网络
+        }
     }
 }
 
@@ -158,12 +250,14 @@ struct ContentView: View {
 struct SettingsSheet: View {
     @ObservedObject var model: SessionModel
     @Environment(\.dismiss) private var dismiss
+    @State private var copiedAt = ""
 
     var body: some View {
         NavigationStack {
             Form {
                 connectionSection
                 ProbeSection()
+                logSection
                 crashSection
                 stepsSection
                 versionSection
@@ -201,6 +295,40 @@ struct SettingsSheet: View {
             Text("连接参数")
         } footer: {
             Text("开发模式:密钥存在 App 内,对应家里 livekit-server --dev。仅内网测试用,正式版应改成服务端发 token。")
+        }
+    }
+
+    /// 记录日志 + 排错:一键把连接参数和探针日志复制出来,直接贴回来或存档
+    private var logSection: some View {
+        Section {
+            Button {
+                let log = BroadcastProbe.fullLogText()
+                UIPasteboard.general.string = log
+                copiedAt = log.isEmpty ? "没有日志可复制(扩展没启动过?)" : "已复制 \(log.count) 字符"
+            } label: {
+                Label("复制探针日志", systemImage: "doc.on.doc")
+            }
+            Button {
+                let bundle = """
+                server=\(model.serverURL)
+                identity=\(model.identity)
+                status=\(model.status)
+                录=\(Int(model.recordedSeconds)) 收=\(Int(model.serverSeconds)) 句=\(model.lines.count)
+
+                \(BroadcastProbe.fullLogText())
+                """
+                UIPasteboard.general.string = bundle
+                copiedAt = "已复制(连接参数 + 状态 + 日志)"
+            } label: {
+                Label("复制全套排错信息", systemImage: "square.and.arrow.up")
+            }
+            if !copiedAt.isEmpty {
+                Text(copiedAt).font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("日志与排错")
+        } footer: {
+            Text("排错顺序:①「网络」按钮看路通不通;②「扩展」按钮看扩展起没起、麦克风有没有在收(灰/蓝/红三态);③在这里复制日志贴回来。")
         }
     }
 

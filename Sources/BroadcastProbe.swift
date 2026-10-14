@@ -53,14 +53,50 @@ enum BroadcastProbe {
         try? FileManager.default.removeItem(at: url)
     }
 
-    /// 直播是否在进行:扩展每 3 秒往共享文件写一行,所以"文件最近还在被写"就是直播中。
-    /// 为什么用文件时间戳而不是解析内容:扩展在锁屏/后台时也可能只写不含计数的行,
-    /// 时间戳是最省事又不会误判的信号。
-    static func isBroadcasting(within seconds: TimeInterval = 8) -> Bool {
+    /// 直播是否在进行:**只认扩展显式写的标记行**
+    /// (启动时 `=== 扩展启动`、收尾时 `=== 扩展结束`),不做任何超时猜测。
+    /// 为什么不要"N 秒没写入就算停":实测停顿期间可能整段时间都没有新行
+    /// (音频静音超过 30 秒后扩展会按设计关掉那条传输连接,此时扩展仍在直播),
+    /// 超时会把正在直播的静音时段误判成已停止 —— 用户实测反馈"没必要",故去掉。
+    static func isBroadcasting() -> Bool {
+        guard let url = containerURL()?.appendingPathComponent(fileName) else { return false }
+        var alive = false
+        for line in tailText(url: url, bytes: 8192).split(separator: "\n") {
+            if line.contains("=== 扩展启动") { alive = true }
+            else if line.contains("=== 扩展结束") { alive = false }
+        }
+        return alive
+    }
+
+    /// 扩展最近一次记下的麦克风采样帧数(>0 = 确实收到麦克风音频)。
+    /// 用途:主界面「扩展」按钮变红 —— 只有真拿到麦克风输入,才敢说"麦克风开着"。
+    /// 蓝色是留给"已开播但还没看到麦克风输入"的:那是不确定状态,不硬下结论。
+    static func micFramesSeen() -> Int {
+        guard let url = containerURL()?.appendingPathComponent(fileName) else { return 0 }
+        var last = 0
+        for line in tailText(url: url, bytes: 16384).split(separator: "\n") where line.contains("计数 回调") {
+            guard let marker = line.range(of: "audioMic=") else { continue }
+            let digits = line[marker.upperBound...].prefix { $0.isNumber }
+            if let value = Int(digits) { last = value }
+        }
+        return last
+    }
+
+    /// 整份探针日志(设置页「复制日志」用),带上限免得把大文件全读进内存
+    static func fullLogText(limit: Int = 200_000) -> String {
         guard let url = containerURL()?.appendingPathComponent(fileName),
-              let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let modified = attrs[.modificationDate] as? Date else { return false }
-        return Date().timeIntervalSince(modified) < seconds
+              let text = try? String(contentsOf: url, encoding: .utf8) else { return "" }
+        return text.count > limit ? String(text.suffix(limit)) : text
+    }
+
+    /// 只读文件末尾若干字节,避免直播久了(每 3 秒一行)把整份文件读进内存。
+    private static func tailText(url: URL, bytes: UInt64) -> String {
+        guard let fh = try? FileHandle(forReadingFrom: url) else { return "" }
+        defer { try? fh.close() }
+        let size = (try? fh.seekToEnd()) ?? 0
+        try? fh.seek(toOffset: size > bytes ? size - bytes : 0)
+        let data = (try? fh.readToEnd()) ?? Data()
+        return String(decoding: data, as: UTF8.self)
     }
 }
 
