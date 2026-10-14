@@ -26,6 +26,16 @@ final class SampleHandler: RPBroadcastSampleHandler {
     //   为什么加第二条:App Group 能不能签进去在免费自签下不保证,而"扩展能不能连上家里"本身就是
     //   阶段二真扩展的**前提**——这条通道一旦通,阶段二最担心的那件事就不担心了。
     private let reportURL = "https://100.64.0.2:7443/probe"
+    /// 上报用的独立会话(与 5A 的 /ingest 同一套 ephemeral 配置)。
+    /// 为什么不能再用 URLSession.shared:实测「每 3 秒上报」总是发完第一拍就无声无息 ——
+    /// 而同样从扩展里、同样走 7443、只是换了自己的 ephemeral 会话的 5A /ingest 一路通畅。
+    /// 差别只在会话,所以这里自己建一个;失败也不再闷着,写进共享日志留证。
+    private let reportSession: URLSession = {
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = 5
+        cfg.httpMaximumConnectionsPerHost = 1
+        return URLSession(configuration: cfg)
+    }()
     private var ticker: DispatchSourceTimer?
     /// 5A:把「对方的声音」发回家里的发送器(见 IngestSender.swift)
     private var ingest: IngestSender?
@@ -95,12 +105,17 @@ final class SampleHandler: RPBroadcastSampleHandler {
         q += "&ingest=\(ingest?.status ?? "off")"
         for (k, v) in formats { q += "&fmt_\(k)=\(v)" }
         let escaped = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
-        guard let url = URL(string: "\(reportURL)?\(escaped)") else { return }
+        guard let url = URL(string: "\(reportURL)?\(escaped)") else {
+            log("上报 \(note) 失败:URL 拼不出来(len=\(q.count))")   // 以前这里是静默 return,查不出原因
+            return
+        }
         var req = URLRequest(url: url)
         req.timeoutInterval = 5
-        URLSession.shared.dataTask(with: req) { [weak self] _, resp, err in
+        // 只在失败时记一行:成功与否家里 7443 的日志里看得到(以前每 3 秒写一行,日志白白长大)
+        reportSession.dataTask(with: req) { [weak self] _, resp, err in
             let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
-            self?.log("上报 note=\(note) → code=\(code) err=\(err?.localizedDescription ?? "无")")
+            guard code != 200 || err != nil else { return }
+            self?.log("上报 \(note) 失败:code=\(code) err=\(err?.localizedDescription ?? "无")")
         }.resume()
     }
 
