@@ -42,6 +42,7 @@ struct ContentView: View {
     private var buttonRow: some View {
         HStack(spacing: 6) {
             netButton
+            micModeButton
             recordButton
             extButton
             settingsButton
@@ -54,6 +55,16 @@ struct ContentView: View {
                    fill: (netOK == true ? Color.blue : Color.gray).opacity(0.18),
                    fg: netOK == true ? Color.blue : Color.gray) {
             Task { await refreshNet() }
+        }
+    }
+
+    /// 宽谱:点它请系统把「麦克风模式」面板弹出来(App 不能替你设,只能叫面板)。
+    /// 底色当状态灯:当前是宽谱 = 实心蓝;其它模式 / 未授权 = 灰(用户口径 2026-10-15)。
+    private var micModeButton: some View {
+        flatButton(icon: "waveform", title: "宽谱",
+                   fill: model.micIsWide ? Color.blue : Color.secondary.opacity(0.25),
+                   fg: model.micIsWide ? .white : .primary) {
+            model.presentMicModePicker()
         }
     }
 
@@ -144,6 +155,9 @@ struct ContentView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 6)
+            // 用户口径(2026-10-15):最下一行 = 网络状态 + 麦克风状态 + 录/收/句
+            inlineText("网络", netOK == true ? "通" : "断", netOK == true ? .blue : .secondary)
+            inlineText("麦克风", model.micModeText, model.micIsWide ? .blue : .secondary)
             inlineMetric("录", model.recordedSeconds, .primary)
             inlineMetric("收", model.serverSeconds,
                          (model.recordedSeconds - model.serverSeconds) > 5 ? .red : .green)
@@ -155,6 +169,15 @@ struct ContentView: View {
         .background(
             Rectangle().fill(.bar).ignoresSafeArea(edges: .bottom)
         )
+    }
+
+    /// 「标签 + 短文本」横向排(网络/麦克风这类状态用)
+    private func inlineText(_ label: String, _ value: String, _ color: Color) -> some View {
+        HStack(spacing: 3) {
+            Text(label).font(.system(size: 9)).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 11, weight: .medium)).foregroundStyle(color)
+        }
+        .fixedSize()
     }
 
     /// 「标签 + 数字」横向排(以前是标签一行、数字一行,占两行高度)
@@ -303,10 +326,12 @@ struct ContentView: View {
     private func refreshLoop() async {
         await refreshExt()
         await refreshNet()
+        model.refreshMicMode()
         var tick = 0
         while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 3_000_000_000)   // 每 3 秒看一次扩展状态
+            try? await Task.sleep(nanoseconds: 3_000_000_000)   // 每 3 秒看一次扩展状态 + 麦克风模式
             await refreshExt()
+            model.refreshMicMode()
             tick += 1
             if tick % 5 == 0 { await refreshNet() }             // 每 15 秒顺手探一次网络
         }
@@ -387,6 +412,7 @@ struct SettingsSheet: View {
         identity=\(model.identity)
         status=\(model.status)
         录=\(Int(model.recordedSeconds)) 收=\(Int(model.serverSeconds)) 句=\(model.lines.count)
+        麦克风模式=\(model.micModeText)(宽谱=\(model.micIsWide))
         App Group=\(BroadcastProbe.groupName())
         扩展=\(BroadcastProbe.extensionBundleID)
         version=\(appVersion)

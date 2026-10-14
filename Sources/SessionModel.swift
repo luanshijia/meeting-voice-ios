@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 /// 一句话转写结果(带说话人 —— agent 是按音轨分轨识别后带上 identity 发回来的)。
@@ -18,6 +19,9 @@ final class SessionModel: ObservableObject {
     @Published var partial = ""
     @Published var partialWho = ""
     @Published var isRecording = false
+    /// 当前麦克风模式(只读 —— iOS 不给 App 设置接口;界面只用来看「是不是宽谱」)
+    @Published var micModeText = "读取中"
+    @Published var micIsWide = false
     @Published var recordedSeconds: Double = 0     // 本地推流时长
     @Published var serverSeconds: Double = 0       // 家里已识别到的音频秒数(agent 回传)
     var serverURL: String {
@@ -30,6 +34,34 @@ final class SessionModel: ObservableObject {
         get { cfg.apiSecret } set { cfg.apiSecret = newValue; cfg.save() }
     }
     var identity: String { cfg.identity }
+
+    /// 读一次当前麦克风模式。未授权时不碰这个 API(iOS 17 起未授权访问有风险)。
+    /// 官方口径:iOS 会按 App 记住用户选过的模式(Apple 支持文档 101993)→ 用户选一次宽谱
+    /// 就等于给它定了默认;App 只能读、只能请系统弹面板,不能替用户选。
+    func refreshMicMode() {
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+            micModeText = "未授权"; micIsWide = false; return
+        }
+        let m = AVCaptureDevice.preferredMicrophoneMode
+        micIsWide = (m == .wideSpectrum)
+        switch m {
+        case .standard:       micModeText = "标准"
+        case .voiceIsolation: micModeText = "语音突显"
+        case .wideSpectrum:   micModeText = "宽谱"
+        default:              micModeText = "自动"
+        }
+    }
+
+    /// 「宽谱」按钮:请系统把麦克风模式选择面板弹出来(选还是用户自己选)。
+    /// 面板关掉后再刷一次,按钮颜色立刻跟上。
+    func presentMicModePicker() {
+        note("点了「宽谱」→ 请系统弹麦克风模式面板")
+        AVCaptureDevice.showSystemUserInterface(.microphoneModes)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            refreshMicMode()
+        }
+    }
 
     func note(_ s: String) {
         notes.append("\(Self.stamp()) \(s)")
