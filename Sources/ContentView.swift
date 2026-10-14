@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import AVFoundation
 
 /// 主界面(阶段三)。
 /// 顶部一行四个按钮,颜色当指示灯用:
@@ -387,6 +388,7 @@ struct SettingsSheet: View {
         identity=\(model.identity)
         status=\(model.status)
         录=\(Int(model.recordedSeconds)) 收=\(Int(model.serverSeconds)) 句=\(model.lines.count)
+        麦克风模式=\(micModeText)
         App Group=\(BroadcastProbe.groupName())
         扩展=\(BroadcastProbe.extensionBundleID)
         version=\(appVersion)
@@ -424,6 +426,7 @@ struct SettingsSheet: View {
             AppGroupRow()
             ExtensionRow()
             valueRow("身份", model.identity)
+            valueRow("麦克风", micModeText)
             valueRow("版本", appVersion)
         } header: {
             Text("状态")
@@ -444,6 +447,19 @@ struct SettingsSheet: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
                 .truncationMode(.middle)
+        }
+    }
+
+    /// 当前麦克风模式(只读 —— iOS 不给设置接口,只能读出来给你看)。
+    /// 用户口径(2026-10-15):「宽谱」对面对面多人会议更合适(不滤除环境声、不做通话级降噪)。
+    /// 这个值只能在控制中心改,但 iOS 会**按 App 记住**:选一次就等于给 MeetingVoice 定了默认。
+    private var micModeText: String {
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else { return "未授权" }
+        switch AVCaptureDevice.preferredMicrophoneMode {
+        case .standard:       return "标准"
+        case .voiceIsolation: return "语音突显"
+        case .wideSpectrum:   return "宽谱"
+        default:              return "自动(\(AVCaptureDevice.preferredMicrophoneMode.rawValue))"
         }
     }
 
