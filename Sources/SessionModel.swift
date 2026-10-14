@@ -20,17 +20,6 @@ final class SessionModel: ObservableObject {
     @Published var isRecording = false
     @Published var recordedSeconds: Double = 0     // 本地推流时长
     @Published var serverSeconds: Double = 0       // 家里已识别到的音频秒数(agent 回传)
-    @Published var summary = ""                    // 实时总结正文(agent 推 summary 消息时填)
-    @Published var summaryState = "自动更新"        // 总结行右侧小字:自动更新 / 已请求… / 更新于 HH:MM:SS
-
-    /// 「实时总结」按钮:点一次,请家里立刻出一段(站 4 后端已接)。
-    func requestSummary() {
-        guard isRecording else { return }
-        summaryState = "已请求,稍等…"
-        note("点了实时总结(请家里出一段)")
-        Task { await room.send(["type": "summary_request", "ts": Int(Date().timeIntervalSince1970)]) }
-    }
-
     var serverURL: String {
         get { cfg.url } set { cfg.url = newValue; cfg.save() }
     }
@@ -78,11 +67,6 @@ final class SessionModel: ObservableObject {
         room.onTranscript = { [weak self] type, who, audioS, text, gap, ts in
             guard let self else { return }
             self.serverSeconds = audioS          // 「收」= 家里已识别的音频秒数
-            if type == "summary" {               // 站 4 后端接上后,agent 会推这个类型过来
-                self.summary = text
-                self.summaryState = "更新于 \(Self.stamp())"
-                return
-            }
             if type == "final" {
                 if !text.isEmpty {
                     self.lines.append(TranscriptLine(who: who, text: text, gap: gap, ts: ts))

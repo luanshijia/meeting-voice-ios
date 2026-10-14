@@ -7,7 +7,8 @@ import UIKit
 ///   开启 = 录音开关(红=录着)
 ///   扩展 = 系统直播三态(灰=确定没开播 / 蓝=已开播但没看到麦克风输入,是猜的 / 红=确定收到麦克风输入)
 ///   设置 = 连接参数、日志排错、黑匣子
-/// 下面:上 2/3 滚动字幕,下 1/3 实时总结(后端待接入,先留位)。
+/// 下面:滚动字幕占满整屏(2026-10-15:下 1/3 的「实时总结」按用户要求整个删除,
+/// 家里那侧也不再生成/推送任何提要 —— 见 notes/HANDOFF.md §12)。
 struct ContentView: View {
     @StateObject private var model = SessionModel()
     @State private var showSettings = false
@@ -17,12 +18,11 @@ struct ContentView: View {
     @State private var netOK: Bool? = nil            // nil = 还没测过
     @State private var broadcastAlive = false        // 扩展写过「=== 扩展启动」且没写「结束」
     @State private var broadcastMicFrames = 0        // 扩展记下的麦克风采样帧数
-    // 实时总结的文本与状态改由 SessionModel 持有(agent 推 summary 消息时由它填)
 
     var body: some View {
         VStack(spacing: 6) {
             buttonRow                       // 顶部只剩四个按钮(状态行搬到屏幕最下方)
-            paneSplit
+            transcript                      // 提要面板已删 → 字幕铺满整屏
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.horizontal, 12)
@@ -169,78 +169,21 @@ struct ContentView: View {
         .fixedSize()
     }
 
-    // MARK: - 版面:上 2/3 转写,下 1/3 总结
-
-    private var paneSplit: some View {
-        GeometryReader { geo in
-            let gap: CGFloat = 8
-            let total = geo.size.height
-            VStack(spacing: gap) {
-                transcript.frame(height: max(90, (total - gap) * 2 / 3))
-                summaryPane.frame(height: max(60, (total - gap) / 3))
-            }
-        }
-    }
-
-    /// 下 1/3:实时总结(站 4 后端已接)。
-    /// 家里每 30~60 秒把新增转写压成几条要点推过来;标题行右侧「总结」按钮 = 点一次立刻出一段。
-    private var summaryPane: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Text("实时总结").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
-                Spacer(minLength: 4)
-                Text(model.summaryState).font(.system(size: 9)).foregroundStyle(.secondary)
-                Button {
-                    model.requestSummary()
-                } label: {
-                    Text("总结")
-                        .font(.system(size: 11, weight: .semibold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.blue.opacity(model.isRecording ? 0.18 : 0.08)))
-                        .foregroundStyle(model.isRecording ? Color.blue : Color.secondary)
-                }
-                .buttonStyle(.plain)
-                .disabled(!model.isRecording)          // 没在记录 → 没内容可总结
-            }
-            ScrollView {
-                Text(model.summary.isEmpty
-                     ? "（这里会显示实时提要:家里每 30~60 秒把新增的转写压成几条要点;也可以点右边「总结」立刻出一段。）"
-                     : model.summary)
-                    .font(.system(size: 14))
-                    .lineSpacing(4)
-                    .foregroundStyle(model.summary.isEmpty ? .secondary : .primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-            }
-        }
-        .padding(8)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.08)))
-    }
-
     /// 转写区。渲染规则(用户口径):
-    ///   ① 换人就换段 —— 说话人名字只在他换人时出现一次;
-    ///   ② 同一人两段之间静音 ≥2.4 秒 → 中间插一行 ~~~(超 30 秒带时长);
+    ///   ① 换人就换段 —— 说话人名字只在他换人时出现一次(且屏幕上看不到机器身份,自己那一路显示「我」);
+    ///   ② 同一人两段之间静音 ≥2.4 秒 → 把 ~~~ 接在**上一段末尾同一行**(2026-10-15 用户口径:
+    ///      以前 ~~~ 单独占一行会切断段落流,现在不要分行);
     ///   ③ 同一人一口气说很久 → 按标点换行(约 100 字一段)。
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(displayRows) { row in
-                        if row.isGap {
-                            Text(row.text)
-                                .font(.system(size: 13))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .id(row.id)
-                        } else {
-                            paragraph(who: row.who, text: row.text, color: .primary)
-                                .id(row.id)
-                        }
+                        paragraph(who: row.who, text: row.text, tail: row.tail, color: .primary)
+                            .id(row.id)
                     }
                     if !model.partial.isEmpty {
-                        paragraph(who: model.partialWho, text: model.partial, color: .blue)
+                        paragraph(who: displayWho(model.partialWho), text: model.partial, color: .blue)
                             .id("partial")
                     }
                 }
@@ -259,12 +202,12 @@ struct ContentView: View {
 
     // MARK: - 转写渲染(分人 / 停顿 / 超长换行)
 
-    /// 界面上的一行:要么是一段转写,要么是一行停顿符号 ~~~。
+    /// 界面上的一段转写。停顿符号 ~~~ 不再自成一行,而是接在段落末尾(tail)。
     private struct DisplayRow: Identifiable {
         let id: String
-        let who: String        // 空 = 不是转写段(~~~ 行)
+        let who: String        // 空 = 同一人接着说,不重复显示说话人
         let text: String
-        let isGap: Bool
+        let tail: String       // 非空 = 这段结束后的停顿标记(~~~)
     }
 
     /// 静音超过这么久,才在同一人的两段之间显示 ~~~(沿用家里断句阈值 2.4 秒)
@@ -275,14 +218,23 @@ struct ContentView: View {
         var prevWho = ""
         for (idx, line) in model.lines.enumerated() {
             let sameSpeaker = (line.who == prevWho)
-            if sameSpeaker, let gap = line.gap, gap >= Self.gapThreshold {
-                rows.append(DisplayRow(id: "gap-\(idx)", who: "", text: Self.gapLabel(gap), isGap: true))
+            if sameSpeaker, let gap = line.gap, gap >= Self.gapThreshold, !rows.isEmpty {
+                // ~~~ 接在上一段末尾同一行(不再单独占一行、不再切断段落流)
+                let last = rows[rows.count - 1]
+                rows[rows.count - 1] = DisplayRow(id: last.id, who: last.who,
+                                                  text: last.text, tail: Self.gapLabel(gap))
             }
-            rows.append(DisplayRow(id: "line-\(idx)", who: sameSpeaker ? "" : line.who,
-                                   text: Self.wrap(line.text), isGap: false))
+            rows.append(DisplayRow(id: "line-\(idx)", who: sameSpeaker ? "" : displayWho(line.who),
+                                   text: Self.wrap(line.text), tail: ""))
             prevWho = line.who
         }
         return rows
+    }
+
+    /// 屏幕上不显示机器身份(用户口径:不要出现 luan-luxin):
+    /// 自己那一路(同一身份)显示「我」,扩展那一路本来就是「对方」,其它原样。
+    private func displayWho(_ who: String) -> String {
+        who.isEmpty ? who : (who == model.identity ? "我" : who)
     }
 
     /// ~~~ 的文案:超过 30 秒带上时长(用户口径),否则就一个 ~~~。
@@ -314,16 +266,24 @@ struct ContentView: View {
         return out
     }
 
-    private func paragraph(who: String, text: String, color: Color) -> some View {
+    private func paragraph(who: String, text: String, tail: String = "", color: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             if !who.isEmpty {
                 Text(who).font(.system(size: 10)).foregroundStyle(.secondary)
             }
-            Text(text)
-                .font(.system(size: 17))
-                .lineSpacing(6)
-                .foregroundStyle(color)
-                .textSelection(.enabled)
+            if tail.isEmpty {
+                Text(text)
+                    .font(.system(size: 17))
+                    .lineSpacing(6)
+                    .foregroundStyle(color)
+                    .textSelection(.enabled)
+            } else {
+                // 停顿标记跟在正文尾部同一行,小一号、灰一点
+                (Text(text).font(.system(size: 17)).foregroundColor(color)
+                 + Text("  " + tail).font(.system(size: 13)).foregroundColor(.secondary))
+                    .lineSpacing(6)
+                    .textSelection(.enabled)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
