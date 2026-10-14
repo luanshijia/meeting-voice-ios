@@ -74,10 +74,9 @@ struct ContentView: View {
     /// 为什么只能猜:系统那个「麦克风」开关的状态 App 读不到(iOS 没给接口),只能靠扩展有没有收到音频反推。
     private var extButton: some View {
         ZStack {
-            buttonLabel(icon: "dot.radiowaves.left.and.right", title: extTitle)
+            buttonLabel(icon: "dot.radiowaves.left.and.right", title: extTitle, onDark: broadcastAlive)
                 .background(
-                    RoundedRectangle(cornerRadius: 7)
-                        .stroke(extColor, lineWidth: 1.5)
+                    RoundedRectangle(cornerRadius: 7).fill(extFill)
                 )
             // 系统组件盖在上面:看得见的是我们画的按钮,点得到的是它(它自己会弹选择器)
             BroadcastPickerView()
@@ -86,14 +85,15 @@ struct ContentView: View {
         }
     }
 
+    /// 整块底色随状态变(用户要求:不要只有边框变色)
+    private var extFill: Color {
+        if !broadcastAlive { return Color.secondary.opacity(0.25) }  // 灰:确定没开播
+        return broadcastMicFrames > 0 ? Color.red : Color.blue       // 红:确定收到麦克风 / 蓝:不确定
+    }
+
     private var extTitle: String {
         if !broadcastAlive { return "扩展" }
         return broadcastMicFrames > 0 ? "扩展·收" : "扩展·?"
-    }
-
-    private var extColor: Color {
-        if !broadcastAlive { return .gray }
-        return broadcastMicFrames > 0 ? .red : .blue
     }
 
     private var settingsButton: some View {
@@ -106,11 +106,13 @@ struct ContentView: View {
         .tint(.blue)
     }
 
-    private func buttonLabel(icon: String, title: String) -> some View {
+    /// onDark:底色是红/蓝这种深色时用白字,底色是灰时用默认前景色
+    private func buttonLabel(icon: String, title: String, onDark: Bool = false) -> some View {
         VStack(spacing: 1) {
             Image(systemName: icon).font(.system(size: 14))
             Text(title).font(.system(size: 10, weight: .semibold))
         }
+        .foregroundStyle(onDark ? Color.white : Color.primary)
         .frame(maxWidth: .infinity)
         .frame(height: 34)
     }
