@@ -171,9 +171,8 @@ struct ContentView: View {
         }
     }
 
-    /// 下 1/3:实时总结。标题行右侧的「总结」按钮 = 手动点一次,请家里立刻出一段。
-    /// ⚠ 后端(站 4)还没接:点了没人应答,小字会停在「已请求(后端未接入)」。
-    /// 按钮先做到位,是为了后端接上时手机不用再装一次包。
+    /// 下 1/3:实时总结(站 4 后端已接)。
+    /// 家里每 30~60 秒把新增转写压成几条要点推过来;标题行右侧「总结」按钮 = 点一次立刻出一段。
     private var summaryPane: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
@@ -196,7 +195,7 @@ struct ContentView: View {
             }
             ScrollView {
                 Text(model.summary.isEmpty
-                     ? "（这一段以后会显示滚动总结:每 30 秒把新增的转写压成几条要点。总结后端还没接入,先占位。）"
+                     ? "（这里会显示实时提要:家里每 30~60 秒把新增的转写压成几条要点;也可以点右边「总结」立刻出一段。）"
                      : model.summary)
                     .font(.system(size: 14))
                     .lineSpacing(4)
