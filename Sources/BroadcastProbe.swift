@@ -52,6 +52,16 @@ enum BroadcastProbe {
         guard let url = containerURL()?.appendingPathComponent(fileName) else { return }
         try? FileManager.default.removeItem(at: url)
     }
+
+    /// 直播是否在进行:扩展每 3 秒往共享文件写一行,所以"文件最近还在被写"就是直播中。
+    /// 为什么用文件时间戳而不是解析内容:扩展在锁屏/后台时也可能只写不含计数的行,
+    /// 时间戳是最省事又不会误判的信号。
+    static func isBroadcasting(within seconds: TimeInterval = 8) -> Bool {
+        guard let url = containerURL()?.appendingPathComponent(fileName),
+              let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let modified = attrs[.modificationDate] as? Date else { return false }
+        return Date().timeIntervalSince(modified) < seconds
+    }
 }
 
 /// 系统的广播启动器:点它 → 系统弹选择器 → 选「MeetingVoice 广播」→ 开始共享。

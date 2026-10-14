@@ -5,16 +5,24 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var model = SessionModel()
     @State private var showSettings = false
+    @State private var broadcastAlive = false        // 直播是否在进行(扩展每 3 秒写一次共享文件)
 
     var body: some View {
         VStack(spacing: 8) {
             header
-            connectButton
+            controlRow
+            hintRow
             transcript
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 8)
         .sheet(isPresented: $showSettings) { SettingsSheet(model: model) }
+        .task {
+            while !Task.isCancelled {                 // 每 3 秒问一次扩展还活着没,红点跟着变
+                broadcastAlive = BroadcastProbe.isBroadcasting()
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            }
+        }
     }
 
     private var header: some View {
@@ -39,11 +47,19 @@ struct ContentView: View {
         .padding(.top, 4)
     }
 
-    private var connectButton: some View {
+    private var controlRow: some View {
+        HStack(spacing: 10) {
+            recordButton
+            liveButton
+        }
+    }
+
+    /// 开启 / 停止(原来叫"开始录音")
+    private var recordButton: some View {
         Button {
             model.toggle()
         } label: {
-            Label(model.isRecording ? "停止" : "开始录音",
+            Label(model.isRecording ? "停止" : "开启",
                   systemImage: model.isRecording ? "stop.circle.fill" : "record.circle")
                 .frame(maxWidth: .infinity)
                 .font(.title3.weight(.semibold))
@@ -51,6 +67,39 @@ struct ContentView: View {
         .buttonStyle(.borderedProminent)
         .tint(model.isRecording ? .red : .accentColor)
         .controlSize(.large)
+    }
+
+    /// 直播(原先在"探针页"里的红点):同一行,不用再切页
+    private var liveButton: some View {
+        HStack(spacing: 6) {
+            BroadcastPickerView()
+                .frame(width: 30, height: 30)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(broadcastAlive ? Color.red : Color.secondary.opacity(0.6))
+                        .frame(width: 9, height: 9)
+                    Text(broadcastAlive ? "直播中" : "直播")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                Text(broadcastAlive ? "对方声音在传" : "点图标开启")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(broadcastAlive ? Color.red : Color.secondary.opacity(0.5), lineWidth: 1)
+        )
+    }
+
+    private var hintRow: some View {
+        Text("先点「开启」录音,再点右侧图标 → 选 MeetingVoice(别用系统录屏)")
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var transcript: some View {
@@ -179,7 +228,8 @@ struct SettingsSheet: View {
 
     private var versionSection: some View {
         Section {
-            Text("v0.3.0 · build 12 · 扩展探针")
+            // 从包里读真版本,别再写死(以前写死的 "build 12" 会误导排查)
+            Text("v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") · build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?")")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
