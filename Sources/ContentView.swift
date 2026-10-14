@@ -21,8 +21,8 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 6) {
+            statusRow                                  // 状态文字(如「已连上房间」)+ 三个数,放最上面
             buttonRow
-            statusRow
             paneSplit
         }
         .padding(.horizontal, 12)
@@ -103,7 +103,7 @@ struct ContentView: View {
             buttonLabel(icon: "gearshape", title: "设置")
         }
         .buttonStyle(.bordered)
-        .tint(.gray)
+        .tint(.blue)
     }
 
     private func buttonLabel(icon: String, title: String) -> some View {

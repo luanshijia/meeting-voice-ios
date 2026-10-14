@@ -133,17 +133,6 @@ struct ProbeSection: View {
                     .foregroundStyle(.secondary)
             }
             HStack(spacing: 12) {
-                BroadcastPickerView()
-                    .frame(width: 44, height: 44)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("点左边的图标 → 选「MeetingVoice 广播」")
-                        .font(.system(size: 13))
-                    Text("探针不传输音频,只记录扩展有没有收到声音")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            HStack {
                 Button("刷新日志") { load() }
                 Spacer()
                 Button("清空日志") { BroadcastProbe.clearLog(); load() }
