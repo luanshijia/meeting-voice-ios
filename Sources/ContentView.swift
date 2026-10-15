@@ -1,14 +1,16 @@
 import SwiftUI
 import UIKit
 
-/// 主界面(阶段三)。
-/// 顶部一行四个按钮,颜色当指示灯用:
+/// 主界面。
+/// 顶部一行**五个**按钮(等宽),颜色当指示灯用:
 ///   网络 = 能不能连上家里(蓝=通 / 灰=不通或没测)
+///   宽谱 = 当前麦克风是否宽谱模式(蓝=是 / 灰=否或未授权);点它弹系统「麦克风模式」面板
 ///   开启 = 录音开关(红=录着)
 ///   扩展 = 系统直播三态(灰=确定没开播 / 蓝=已开播但没看到麦克风输入,是猜的 / 红=确定收到麦克风输入)
 ///   设置 = 连接参数、日志排错、黑匣子
-/// 下面:滚动字幕占满整屏(2026-10-15:下 1/3 的「实时总结」按用户要求整个删除,
-/// 家里那侧也不再生成/推送任何提要 —— 见 notes/HANDOFF.md §12)。
+/// 中间:三块固定高度 —— 上 1/10 第一遍(蓝,流式)、中 1/2 第二遍定稿(黑)、下 4/10 会中提要
+///   (档位按钮 + 状态行 + 要点列表,见 `summaryPanel`)。
+/// 最底:一整行状态(未连接 / 网络 断 / 麦克风 … / 录 收 句),贴屏幕底边(`bottomBar`)。
 struct ContentView: View {
     @StateObject private var model = SessionModel()
     @State private var showSettings = false
@@ -20,16 +22,22 @@ struct ContentView: View {
     @State private var broadcastMicFrames = 0        // 扩展记下的麦克风采样帧数
 
     var body: some View {
-        VStack(spacing: 6) {
-            buttonRow                       // 顶部只剩四个按钮(状态行搬到屏幕最下方)
-            transcript                      // 提要面板已删 → 字幕铺满整屏
+        // 底部那一行(未连接 / 网络 断 / 麦克风 … / 录 收 句)改成**真正贴屏幕底边**:
+        // 以前挂在 safeAreaInset(edge: .bottom) 里,内容被顶在 34 点安全区之上,底边空出一条;
+        // 现在整块允许下沉(home 指示条所在那条带),只留 12 点内边距避开指示条本身。
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 6) {
+                buttonRow                   // 顶部只剩四个按钮(状态行搬到屏幕最下方)
+                transcript                  // 提要面板已删 → 字幕铺满整屏
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
+            .padding(.bottom, 26)           // 给贴底的底栏让出高度,别盖住字幕
+
+            bottomBar
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.horizontal, 12)
-        .padding(.top, 4)
-        // 状态 + 录/收/句 钉在屏幕最下方:占的是系统本来留给 home 指示条的那条空白带,
-        // 等于白捡一行高度 —— 上面 2/3 转写和 1/3 总结各多占几十点。
-        .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
+        .ignoresSafeArea(edges: .bottom)
         .sheet(isPresented: $showSettings) { SettingsSheet(model: model) }
         .task { await refreshLoop() }
         .onChange(of: scenePhase) { _, phase in
@@ -149,6 +157,7 @@ struct ContentView: View {
     /// 一行放完全部:左边状态文字、右边「录 12 收 12 句 3」。
     /// 两处细节(用户口径):① 数字不再压成上下两行;② 底色一路铺到屏幕底边(绕开安全区),
     /// 视觉上就是贴着屏幕圆角底边的一道,而不是浮在中间的一条。
+    /// 2026-10-16:整栏已下沉到屏幕底边(ZStack + ignoresSafeArea),这里留 12 点内边距避开 home 指示条。
     private var bottomBar: some View {
         HStack(spacing: 8) {
             Text(model.status)
@@ -167,7 +176,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.top, 3)
-        .padding(.bottom, 1)
+        .padding(.bottom, 12)
         .background(
             Rectangle().fill(.bar).ignoresSafeArea(edges: .bottom)
         )
