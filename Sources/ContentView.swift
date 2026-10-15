@@ -213,7 +213,7 @@ struct ContentView: View {
                 Divider().opacity(0.25)
                 finalPanel.frame(height: usable * 0.5)
                 Divider().opacity(0.25)
-                summaryPanel.frame(height: usable * 0.4)
+                summaryPanel(width: geo.size.width).frame(height: usable * 0.4)
             }
         }
     }
@@ -252,44 +252,36 @@ struct ContentView: View {
         }
     }
 
-    /// 会中滚动提要(方案 v3,2026-10-15;界面按用户 2026-10-16 意见调整):
-    ///   [自动]/[手动] = 档位开关(自动 5 分钟 / 手动 10 分钟);几何与第一排按钮完全一致
-    ///                   (1/4 宽、块高 34、图标 + 10pt 小字),右对齐靠到头;未选中灰、选中同第一排的实心蓝;
-    ///   [状态] = 只读:显示"为什么这轮没出"(有序原因链,原因预先写死)。
-    /// 没有"到点必出":新增不足 200 字、转写质量不足、机器忙(精转/总结/显存/CPU)→ 状态行给原因。
-    private var summaryPanel: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                // 两个占位块:让档位按钮各占 1/4 宽,和第一排的按钮严格对齐(用户要求宽度一致)
-                Color.clear.frame(maxWidth: .infinity, maxHeight: 34)
-                Color.clear.frame(maxWidth: .infinity, maxHeight: 34)
-                flatButton(icon: "wand.and.stars", title: "自动",
-                           fill: model.sumMode == "auto" ? Color.blue : Color.secondary.opacity(0.25),
-                           fg: model.sumMode == "auto" ? .white : .secondary) { model.setSumMode("auto") }
-                flatButton(icon: "hand.tap", title: "手动",
-                           fill: model.sumMode == "manual" ? Color.blue : Color.secondary.opacity(0.25),
-                           fg: model.sumMode == "manual" ? .white : .secondary) { model.setSumMode("manual") }
+    /// 会中滚动提要(方案 v3;界面按用户 2026-10-16 两条反馈改):
+    ///   **整排只占一行**:[自动] [手动] + 「状态」+ 提示内容;
+    ///   两个档位按钮 = 纯文字、单行、宽度与第一排按钮严格一致(第一排是 5 等分,这里用同一算法算宽度),
+    ///   靠左排;未选中灰、选中同第一排的实心蓝;高度 34 与第一排一致;
+    ///   提示过长就地截断(够看出意思即可),不再换行、不再多占一行;
+    ///   下面是提要要点列表(空的时候什么都不显示 —— 空态提示与状态行重复,已去掉)。
+    /// 语义:没有"到点必出",新增不足 200 字 / 转写质量不足 / 机器忙 → 状态行直接给原因。
+    private func summaryPanel(width: CGFloat) -> some View {
+        let gap: CGFloat = 6
+        let btnW = max(52, (width - gap * 4) / 5)     // 与第一排同算法:5 等分
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: gap) {
+                modeButton("自动", on: model.sumMode == "auto", width: btnW) { model.setSumMode("auto") }
+                modeButton("手动", on: model.sumMode == "manual", width: btnW) { model.setSumMode("manual") }
+                HStack(spacing: 4) {
+                    Text("状态")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text(model.sumState)
+                        .font(.system(size: 10))
+                        .foregroundStyle(sumStateColor)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            HStack(spacing: 4) {
-                Text("状态")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Text(model.sumState)
-                    .font(.system(size: 10))
-                    .foregroundStyle(sumStateColor)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 2)
 
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
-                        if model.summaries.isEmpty {
-                            Text("等待提要…").font(.caption).foregroundStyle(.secondary)
-                        }
                         ForEach(model.summaries) { item in
                             HStack(alignment: .top, spacing: 6) {
                                 Text(item.clock)
@@ -311,6 +303,20 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    /// 档位按钮:纯文字单行(用户要求不带图标),几何与第一排按钮一致 —— 同字体、同块高 34、同圆角 7。
+    private func modeButton(_ title: String, on: Bool, width: CGFloat,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(on ? .white : .primary)
+                .frame(width: width, height: 34)
+                .background(RoundedRectangle(cornerRadius: 7)
+                    .fill(on ? Color.blue : Color.secondary.opacity(0.25)))
+        }
+        .buttonStyle(.plain)
     }
 
     /// 状态行配色:灰 = 等(周期未到/内容不足)、橙 = 机器忙或转写质量不足、蓝 = 正在生成。
