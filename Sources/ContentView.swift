@@ -50,10 +50,11 @@ struct ContentView: View {
     }
 
     /// 网络:只有显示功能。点了当场测一次;启动和回到前台也会自动测。
+    /// 配色(用户口径 2026-10-15 晚):通 = 实心深蓝(与「宽谱」「开启」同一档);不通/没测 = 灰(与其它按钮关闭态同一档)。
     private var netButton: some View {
         flatButton(icon: netOK == true ? "wifi" : "wifi.slash", title: "网络",
-                   fill: (netOK == true ? Color.blue : Color.gray).opacity(0.18),
-                   fg: netOK == true ? Color.blue : Color.gray) {
+                   fill: netOK == true ? Color.blue : Color.secondary.opacity(0.25),
+                   fg: netOK == true ? .white : .primary) {
             Task { await refreshNet() }
         }
     }
@@ -111,9 +112,10 @@ struct ContentView: View {
         return broadcastMicFrames > 0 ? "扩展·收" : "扩展·?"
     }
 
+    /// 设置:配色统一成「宽谱」「开启」那档实心深蓝(用户口径 2026-10-15 晚;以前是浅蓝 0.18)。
     private var settingsButton: some View {
         flatButton(icon: "gearshape", title: "设置",
-                   fill: Color.blue.opacity(0.18), fg: .blue) {
+                   fill: Color.blue, fg: .white) {
             showSettings = true
         }
     }
@@ -198,7 +200,39 @@ struct ContentView: View {
     ///   ② 同一人两段之间静音 ≥2.4 秒 → 在文字**中间夹一个 ~**(单个半角,不换行、不空行;超 30 秒带时长);
     ///   ③ 长行**不做任何干预** —— 不提前换行、也不阻止换行,交给手机自己排版。
     /// 本机(agent)的断句/定稿/第二遍逻辑完全不变,这里只是不再把它的内部分段显示成段落。
+    /// 转写区(用户口径 2026-10-15 晚):**三块固定高度,互不挤压** ——
+    ///   上 1/2 = 第一遍(蓝,流式滚动);中 1/4 = 第二遍(黑,定稿带 ~);下 1/4 = 实时总结(占位)。
+    /// 为什么改:以前整屏一个滚动区,第一遍的字一长就占满全屏,第二遍只剩最后一行。
     private var transcript: some View {
+        GeometryReader { geo in
+            let usable = max(geo.size.height - 6, 0)      // 扣掉两条分隔线 + 间距
+            VStack(spacing: 3) {
+                partialPanel.frame(height: usable * 0.5)
+                Divider().opacity(0.25)
+                finalPanel.frame(height: usable * 0.25)
+                Divider().opacity(0.25)
+                summaryPanel.frame(height: usable * 0.25)
+            }
+        }
+    }
+
+    /// 第一遍:流式部分自己的滚动区,跟着最新文字滚到底
+    private var partialPanel: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                paragraph(who: displayWho(model.partialWho), text: model.partial, color: .blue)
+                    .id("partial")
+                    .padding(.vertical, 4)
+            }
+            .onChange(of: model.partial) { _, newValue in
+                guard !newValue.isEmpty else { return }
+                proxy.scrollTo("partial", anchor: .bottom)
+            }
+        }
+    }
+
+    /// 第二遍:定稿(带 ~ 停顿记号)自己的滚动区
+    private var finalPanel: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
@@ -206,22 +240,20 @@ struct ContentView: View {
                         paragraph(who: row.who, text: row.text, color: .primary)
                             .id(row.id)
                     }
-                    if !model.partial.isEmpty {
-                        paragraph(who: displayWho(model.partialWho), text: model.partial, color: .blue)
-                            .id("partial")
-                    }
                 }
-                .padding(.vertical, 6)
-            }
-            .onChange(of: model.partial) { _, newValue in
-                guard !newValue.isEmpty else { return }
-                proxy.scrollTo("partial", anchor: .bottom)
+                .padding(.vertical, 4)
             }
             .onChange(of: model.lines.count) { _, _ in
                 guard let last = displayRows.last else { return }
                 proxy.scrollTo(last.id, anchor: .bottom)
             }
         }
+    }
+
+    /// 实时总结:按用户要求「留好地方」占底部 1/4。家里那侧的提要后端 2026-10-15 已整条删除,
+    /// 这块现在是空位(不放任何文字),要接得另做后端。
+    private var summaryPanel: some View {
+        Color.clear
     }
 
     // MARK: - 转写渲染(分人 / 停顿 / 超长换行)
@@ -257,10 +289,11 @@ struct ContentView: View {
         return rows
     }
 
-    /// 屏幕上不显示机器身份(用户口径:不要出现 luan-luxin):
-    /// 自己那一路(同一身份)显示「我」,扩展那一路本来就是「对方」,其它原样。
+    /// 身份标签(用户口径 2026-10-15 晚:**自己那一路不再显示任何标签** ——
+    /// 以前显示「我」或机器身份,没有实际用途和意义,已去掉)。
+    /// 「对方」保留:线上会议时它是唯一能区分两个人的东西,去掉就分不清谁说的。
     private func displayWho(_ who: String) -> String {
-        who.isEmpty ? who : (who == model.identity ? "我" : who)
+        who == model.identity ? "" : who
     }
 
     /// 停顿记号(用户口径 2026-10-15:三个 ~~~ 改成**一个半角 ~**):超过 30 秒带上时长。
