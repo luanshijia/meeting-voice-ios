@@ -11,7 +11,7 @@ final class VoiceRoom: NSObject {
     var onNote: ((String) -> Void)?
     /// (类型 partial/final/summary, 说话人, 服务端已识别的音频秒数, 文字, 前面静了多久, 绝对时间戳)
     /// gap 为 nil = 服务端没测出来(比如刚重连);ts 为 0 = 老服务端没给。
-    var onTranscript: ((String, String, Double, String, Double?, Double) -> Void)?
+    var onTranscript: ((String, String, Double, String, Double?, Double, [String: Any]) -> Void)?
     var onEnded: ((String) -> Void)?
 
     var isConnected: Bool { room?.connectionState == .connected }
@@ -71,7 +71,7 @@ extension VoiceRoom: RoomDelegate {
             let audioS = (obj["audio_s"] as? Double) ?? 0
             let gap = obj["gap_s"] as? Double          // JSON null / 老服务端缺字段 → nil
             let ts = (obj["ts"] as? Double) ?? 0
-            self.onTranscript?(type, who, audioS, text, gap, ts)
+            self.onTranscript?(type, who, audioS, text, gap, ts, obj)
         }
     }
 

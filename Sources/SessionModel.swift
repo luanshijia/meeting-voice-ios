@@ -24,6 +24,18 @@ final class SessionModel: ObservableObject {
     @Published var micIsWide = false
     @Published var recordedSeconds: Double = 0     // 本地推流时长
     @Published var serverSeconds: Double = 0       // 家里已识别到的音频秒数(agent 回传)
+
+    // ---- 会中滚动提要(方案 v3,2026-10-15)----
+    /// 一轮提要 = 一行时间 + 1~3 条短要点(家里只对"新增"出要点,不重写整段)
+    struct SummaryItem: Identifiable {
+        let id = UUID()
+        let clock: String
+        let text: String
+    }
+    @Published var summaries: [SummaryItem] = []
+    @Published var sumMode = "auto"                // auto=自动 5 分钟 / manual=手动 10 分钟
+    @Published var sumState = "等待提要…"           // 状态区文案:由家里推来的 sumstatus 驱动
+    @Published var sumCode = "wait_period"         // 家里给的判定码:no_session/short/quality/busy_*/go
     var serverURL: String {
         get { cfg.url } set { cfg.url = newValue; cfg.save() }
     }
@@ -96,16 +108,27 @@ final class SessionModel: ObservableObject {
             self.stopTimer()
             self.isRecording = false
         }
-        room.onTranscript = { [weak self] type, who, audioS, text, gap, ts in
+        room.onTranscript = { [weak self] type, who, audioS, text, gap, ts, raw in
             guard let self else { return }
-            self.serverSeconds = audioS          // 「收」= 家里已识别的音频秒数
-            if type == "final" {
+            switch type {
+            case "summary":
+                // 会中提要:只追加,不顶走上面的定稿;每条都带手机本地时间(家里的 clock 不一定对得上)
+                self.summaries.append(SummaryItem(clock: Self.stamp().prefix(5).description, text: text))
+                if self.summaries.count > 60 { self.summaries.removeFirst(self.summaries.count - 60) }
+            case "sumstatus":
+                // 状态区:家里每 60 秒推一次(哪怕这轮不出提要)—— 显示的是"为什么没出"
+                self.sumState = text
+                if let m = raw["mode"] as? String, !m.isEmpty { self.sumMode = m }
+                if let c = raw["code"] as? String, !c.isEmpty { self.sumCode = c }
+            case "final":
+                self.serverSeconds = audioS          // 「收」= 家里已识别的音频秒数
                 if !text.isEmpty {
                     self.lines.append(TranscriptLine(who: who, text: text, gap: gap, ts: ts))
                 }
                 self.partial = ""
                 self.partialWho = ""
-            } else {
+            default:
+                self.serverSeconds = audioS
                 self.partial = text
                 self.partialWho = who
             }
@@ -118,12 +141,25 @@ final class SessionModel: ObservableObject {
 
     func toggle() { isRecording ? stop() : start() }
 
+    /// 会中提要档位:自动 5 分钟 / 手动 10 分钟(手动更长 —— 用户口径:在外面要等久一点才抓得到要点)。
+    /// 切档 ≠ 立刻出一段:只是把下一次检查的周期换掉。
+    func setSumMode(_ m: String) {
+        guard m != sumMode else { return }
+        sumMode = m
+        sumState = (m == "auto") ? "已切到自动 · 5 分钟" : "已切到手动 · 10 分钟"
+        note("会中提要档位 → \(m == "auto" ? "自动" : "手动")")
+        Task { await room.send(["type": "summode", "mode": m]) }
+    }
+
     private func start() {
         lines = []
         partial = ""
         partialWho = ""
         recordedSeconds = 0
         serverSeconds = 0
+        summaries = []                      // 新一场:提要列表与状态区都从零开始
+        sumState = "等待提要…"
+        sumCode = "wait_period"
         status = "连接中…"
         isRecording = true
         let cfg = self.cfg
@@ -132,6 +168,7 @@ final class SessionModel: ObservableObject {
             pendingDisconnect = nil
             do {
                 try await room.connect(cfg)
+                await room.send(["type": "summode", "mode": self.sumMode])   // 让家里跟上本机档位
                 self.startTimer()
             } catch {
                 self.note("连接异常:\(error.localizedDescription)")

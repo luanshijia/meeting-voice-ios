@@ -252,10 +252,64 @@ struct ContentView: View {
         }
     }
 
-    /// 实时总结:按用户要求「留好地方」占底部 1/4。家里那侧的提要后端 2026-10-15 已整条删除,
-    /// 这块现在是空位(不放任何文字),要接得另做后端。
+    /// 会中滚动提要(方案 v3,2026-10-15 用户批准):三按钮 + 状态行 + 要点列表。
+    ///   [状态] = 只读仪表盘:显示"为什么这轮没出"(负载闸每条判据都有对应读数);
+    ///   [自动] = 每 5 分钟一档;[手动] = 每 10 分钟一档(比自动长 —— 在外面等久一点再归纳)。
+    /// 没有"到点必出":新增不足 200 字、转写质量不足、机器忙(精转/总结/显存/CPU)→ 状态行给原因。
     private var summaryPanel: some View {
-        Color.clear
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text("状态").font(.caption).foregroundStyle(.secondary)
+                Button("自动 · 5 分") { model.setSumMode("auto") }
+                    .buttonStyle(.bordered).font(.caption)
+                    .tint(model.sumMode == "auto" ? .blue : .gray)
+                Button("手动 · 10 分") { model.setSumMode("manual") }
+                    .buttonStyle(.bordered).font(.caption)
+                    .tint(model.sumMode == "manual" ? .blue : .gray)
+                Spacer(minLength: 4)
+                Text(model.sumState)
+                    .font(.caption2)
+                    .foregroundStyle(sumStateColor)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 4)
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        if model.summaries.isEmpty {
+                            Text("等待提要…").font(.caption).foregroundStyle(.secondary)
+                        }
+                        ForEach(model.summaries) { item in
+                            HStack(alignment: .top, spacing: 6) {
+                                Text(item.clock)
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                    .frame(width: 34, alignment: .leading)
+                                Text(item.text)
+                                    .font(.callout)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .id(item.id)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+                }
+                .onChange(of: model.summaries.count) { _, _ in
+                    guard let last = model.summaries.last else { return }
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+            }
+        }
+    }
+
+    /// 状态行配色:灰 = 等(周期未到/内容不足)、橙 = 机器忙或转写质量不足、蓝 = 正在生成。
+    private var sumStateColor: Color {
+        switch model.sumCode {
+        case "go": return .blue
+        case "quality", "busy_prev", "busy_refine", "busy_vram", "busy_cpu": return .orange
+        default: return .secondary
+        }
     }
 
     // MARK: - 转写渲染(分人 / 停顿 / 超长换行)
