@@ -156,8 +156,8 @@ struct ContentView: View {
     /// 一行放完全部:左边状态文字、右边「录 12 收 12 句 3」。
     /// 两处细节(用户口径):① 数字不再压成上下两行;② 底色一路铺到屏幕底边(绕开安全区),
     /// 视觉上就是贴着屏幕圆角底边的一道,而不是浮在中间的一条。
-    /// 2026-10-16:整栏已下沉到屏幕底边(ZStack + ignoresSafeArea),这里留 12 点内边距避开 home 指示条。
-    /// 2026-10-16:整栏已下沉到屏幕底边(ZStack + ignoresSafeArea);左右各留 24 点(避开屏幕圆角吃字)、
+    /// 2026-10-16:整栏已下沉到屏幕底边(ZStack + ignoresSafeArea);左右各留 24 点(避开屏幕圆角吃字)、下方 12 点(避开 home 指示条)。
+    private var bottomBar: some View {
         HStack(spacing: 8) {
             Text(model.status)
                 .font(.system(size: 10))
