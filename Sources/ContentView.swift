@@ -102,7 +102,7 @@ struct ContentView: View {
                 buttonLabel(icon: "dot.radiowaves.left.and.right", title: extTitle,
                             fg: broadcastAlive ? .white : .primary)
                     .background(
-                        RoundedRectangle(cornerRadius: 7).fill(extFill)
+                        RoundedRectangle(cornerRadius: 6).fill(extFill)
                     )
             }
             .buttonStyle(.plain)                      // 整块底色都算点击区
@@ -128,26 +128,25 @@ struct ContentView: View {
         }
     }
 
-    /// 四个按钮共用的标签几何:图标 + 小字,块高固定 34(就是「扩展」那块的高度)。
-    /// fg:文字/图标颜色,由调用处按状态给(灰/蓝/红/白)。
+    /// 第一排五个按钮共用的标签几何。2026-10-16 用户要求:去掉图标、只留文字,
+    /// 宽度仍是 5 等分;块高与「自动/手动」统一成 24(比原来的 20 高一点点)。
+    /// icon 参数保留但不再使用 —— 为了不改动十几个调用点;要恢复图标只改这一处。
     private func buttonLabel(icon: String, title: String, fg: Color = .primary) -> some View {
-        VStack(spacing: 1) {
-            Image(systemName: icon).font(.system(size: 14))
-            Text(title).font(.system(size: 10, weight: .semibold))
-        }
-        .foregroundStyle(fg)
-        .frame(maxWidth: .infinity)
-        .frame(height: 34)
+        Text(title)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(fg)
+            .frame(maxWidth: .infinity)
+            .frame(height: 24)
     }
 
-    /// 自绘的四等分按钮:整块圆角底色、块高与「扩展」完全一致。
+    /// 自绘的五等分按钮:整块圆角底色、块高统一(与底部档位按钮同高)。
     /// 为什么不用系统 .bordered/.borderedProminent:系统会在内容上下各加一圈内边距,
     /// 「网络/开启/设置」比「扩展」高出一截 —— 一行按钮高低不齐还白占屏幕(用户实测反馈)。
     private func flatButton(icon: String, title: String, fill: Color, fg: Color,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
             buttonLabel(icon: icon, title: title, fg: fg)
-                .background(RoundedRectangle(cornerRadius: 7).fill(fill))
+                .background(RoundedRectangle(cornerRadius: 6).fill(fill))
         }
         .buttonStyle(.plain)
     }
@@ -316,15 +315,15 @@ struct ContentView: View {
     }
 
     /// 档位按钮:纯文字单行、**矮块**(用户 2026-10-16 要求:高度压到第一排按钮的 50~60%,
-    /// 与「状态」那行文字高度接近,只是略高一点),所以块高 20、圆角 5;宽度仍与第一排同算法(5 等分)。
+    /// 与第一排按钮**同高**),块高 24、圆角 6;宽度仍与第一排同算法(5 等分)。
     private func modeButton(_ title: String, on: Bool, width: CGFloat,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(on ? .white : .primary)
-                .frame(width: width, height: 20)
-                .background(RoundedRectangle(cornerRadius: 5)
+                .frame(width: width, height: 24)
+                .background(RoundedRectangle(cornerRadius: 6)
                     .fill(on ? Color.blue : Color.secondary.opacity(0.25)))
         }
         .buttonStyle(.plain)
