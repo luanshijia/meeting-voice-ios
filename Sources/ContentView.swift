@@ -32,7 +32,7 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(.horizontal, 12)
-            .padding(.top, 4)
+            .padding(.top, -10)      // 顶到状态栏下方只剩 ~14 点空隙:上面没有我们的东西,别浪费屏幕
             .padding(.bottom, 26)           // 给贴底的底栏让出高度,别盖住字幕
 
             bottomBar
