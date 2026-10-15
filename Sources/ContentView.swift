@@ -200,18 +200,20 @@ struct ContentView: View {
     ///   ② 同一人两段之间静音 ≥2.4 秒 → 在文字**中间夹一个 ~**(单个半角,不换行、不空行;超 30 秒带时长);
     ///   ③ 长行**不做任何干预** —— 不提前换行、也不阻止换行,交给手机自己排版。
     /// 本机(agent)的断句/定稿/第二遍逻辑完全不变,这里只是不再把它的内部分段显示成段落。
-    /// 转写区(用户口径 2026-10-15 晚):**三块固定高度,互不挤压** ——
-    ///   上 1/2 = 第一遍(蓝,流式滚动);中 1/4 = 第二遍(黑,定稿带 ~);下 1/4 = 实时总结(占位)。
+    /// 转写区(用户口径 2026-10-15 深夜,第二版):**三块固定高度,互不挤压** ——
+    ///   上 1/10 = 第一遍(蓝,流式滚动,只露一两行);中 1/2 = 第二遍(黑,定稿带 ~);
+    ///   下 4/10 = 实时总结区(占位,目前留空)。
+    /// 调整理由:第一遍只是"正在说的"提示,读的是第二遍;把大头留给定稿。
     /// 为什么改:以前整屏一个滚动区,第一遍的字一长就占满全屏,第二遍只剩最后一行。
     private var transcript: some View {
         GeometryReader { geo in
             let usable = max(geo.size.height - 6, 0)      // 扣掉两条分隔线 + 间距
             VStack(spacing: 3) {
-                partialPanel.frame(height: usable * 0.5)
+                partialPanel.frame(height: usable * 0.1)
                 Divider().opacity(0.25)
-                finalPanel.frame(height: usable * 0.25)
+                finalPanel.frame(height: usable * 0.5)
                 Divider().opacity(0.25)
-                summaryPanel.frame(height: usable * 0.25)
+                summaryPanel.frame(height: usable * 0.4)
             }
         }
     }
