@@ -31,7 +31,7 @@ final class VoiceRoom: NSObject {
 
     func connect(_ cfg: LiveKitConfig) async throws {
         guard let token = cfg.makeToken() else {
-            throw NSError(domain: "MeetingVoice", code: 1,
+            throw NSError(domain: "VoiceMemo", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "token 参数不合法"])
         }
         let room = Room()

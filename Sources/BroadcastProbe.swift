@@ -5,15 +5,15 @@ import ReplayKit
 /// 它不参与录音链路,只在设置页里回答一个问题:
 /// 「带扩展的包装上之后,App Group 能不能用、扩展到底有没有收到音频」。
 enum BroadcastProbe {
-    static let groupID = "group.com.luanshijia.meetingvoice"
-    static let extensionBundleID = "com.luanshijia.meetingvoice.broadcast"
+    static let groupID = "group.com.luanshijia.voicememo"
+    static let extensionBundleID = "com.luanshijia.voicememo.broadcast"
     static let fileName = "broadcast-probe.log"
 
     /// nil = entitlement 没被签进去(App Group 不可用),这是探针要抓的第一种失败
     /// 同时试几个候选名:免费自签下 SideStore 可能把团队号后缀注进去(实测见过
     /// group.com.SideStore.SideStore.458RP2552K 这种写法),我们把两种都试一遍,并显示命中的是哪个。
-    static let groupCandidates = ["group.com.luanshijia.meetingvoice",
-                                  "group.com.luanshijia.meetingvoice.458RP2552K"]
+    static let groupCandidates = ["group.com.luanshijia.voicememo",
+                                  "group.com.luanshijia.voicememo.458RP2552K"]
     static private(set) var matchedGroup: String?
 
     static func containerURL() -> URL? {
@@ -109,7 +109,7 @@ enum BroadcastProbe {
     }
 }
 
-/// 系统的广播启动器:点它 → 系统弹选择器 → 选「MeetingVoice 广播」→ 开始共享。
+/// 系统的广播启动器:点它 → 系统弹选择器 → 选「VoiceMemo 广播」→ 开始共享。
 /// 注意:广播【必须】由用户手动启动,App 不能自动触发(这是 iOS 的硬规则)。
 struct BroadcastPickerView: UIViewRepresentable {
     func makeUIView(context: Context) -> RPSystemBroadcastPickerView {

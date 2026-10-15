@@ -16,8 +16,8 @@ final class SampleHandler: RPBroadcastSampleHandler {
     /// 与主 App(BroadcastProbe.groupCandidates)保持同一份候选表。
     /// 教训:上一版扩展只试了原组名,结果 App 侧「App Group 可用」而扩展侧打不开(bg=0)
     /// —— 因为 SideStore 重签时注进的组名可能带团队号后缀,两边试的名字不一致就露不出来。
-    private static let groupCandidates = ["group.com.luanshijia.meetingvoice",
-                                          "group.com.luanshijia.meetingvoice.458RP2552K"]
+    private static let groupCandidates = ["group.com.luanshijia.voicememo",
+                                          "group.com.luanshijia.voicememo.458RP2552K"]
     private var matchedGroup: String?
     private var groupScanned = false
 

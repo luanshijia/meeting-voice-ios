@@ -1,4 +1,4 @@
-# MeetingVoice (iOS)
+# VoiceMemo (iOS)
 
 iPhone 端后台录音 + 推流回家做实时转写的**骨架仓库**,用途只有一个:
 
@@ -17,8 +17,8 @@ iPhone 端后台录音 + 推流回家做实时转写的**骨架仓库**,用途�
 ## 怎么拿产物
 
 1. 打开本仓库的 **Actions** 页,等 `build-ipa` 跑完(约 2~5 分钟);
-2. 点进那次运行,页面底部 **Artifacts** 下载 `MeetingVoice-unsigned-ipa`;
-3. 解压得到 `MeetingVoice-unsigned.ipa`;
+2. 点进那次运行,页面底部 **Artifacts** 下载 `VoiceMemo-unsigned-ipa`;
+3. 解压得到 `VoiceMemo-unsigned.ipa`;
 4. 用 **SideStore** 打开该 `.ipa` 完成签名安装(签名在你的手机上用免费 Apple ID 完成,与本次构建无关)。
 
 ## 为什么不用签名

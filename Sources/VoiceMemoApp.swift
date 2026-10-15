@@ -2,7 +2,7 @@ import LiveKit
 import SwiftUI
 
 @main
-struct MeetingVoiceApp: App {
+struct VoiceMemoApp: App {
     /// 关掉 LiveKit SDK 的「自动停用音频会话」(治点「停止」时那声「嘟」)。
     /// SDK 默认在断开时把 AVAudioSession 置为 inactive,iOS 会为这次会话关闭播一声「嘟」——
     /// 用户开着静音开关也听得到(说明走的是音频会话/媒体通路,不是 App 播的提示音;
