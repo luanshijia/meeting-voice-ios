@@ -192,17 +192,18 @@ struct ContentView: View {
         .fixedSize()
     }
 
-    /// 转写区。渲染规则(用户口径):
-    ///   ① 换人就换段 —— 说话人名字只在他换人时出现一次(且屏幕上看不到机器身份,自己那一路显示「我」);
-    ///   ② 同一人两段之间静音 ≥2.4 秒 → 把 ~~~ 接在**上一段末尾同一行**(2026-10-15 用户口径:
-    ///      以前 ~~~ 单独占一行会切断段落流,现在不要分行);
-    ///   ③ 同一人一口气说很久 → 按标点换行(约 100 字一段)。
+    /// 转写区。渲染规则(用户口径 2026-10-15):
+    ///   ① **同一人接着写** —— 收到 final 不再另起一段,直接接在上一段文字后面;换人才分段
+    ///      (这时才断行 + 显示说话人;屏幕上看不到机器身份,自己那一路显示「我」);
+    ///   ② 同一人两段之间静音 ≥2.4 秒 → 在文字**中间夹一个 ~**(单个半角,不换行、不空行;超 30 秒带时长);
+    ///   ③ 长行**不做任何干预** —— 不提前换行、也不阻止换行,交给手机自己排版。
+    /// 本机(agent)的断句/定稿/第二遍逻辑完全不变,这里只是不再把它的内部分段显示成段落。
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(displayRows) { row in
-                        paragraph(who: row.who, text: row.text, tail: row.tail, color: .primary)
+                        paragraph(who: row.who, text: row.text, color: .primary)
                             .id(row.id)
                     }
                     if !model.partial.isEmpty {
@@ -225,15 +226,15 @@ struct ContentView: View {
 
     // MARK: - 转写渲染(分人 / 停顿 / 超长换行)
 
-    /// 界面上的一段转写。停顿符号 ~~~ 不再自成一行,而是接在段落末尾(tail)。
+    /// 界面上的一段转写。**同一个说话人的连续定稿会长在同一段里**(text 会一直往后追加),
+    /// 只有换人才起新的一段。停顿记号 ~ 直接夹在 text 中间。
     private struct DisplayRow: Identifiable {
         let id: String
         let who: String        // 空 = 同一人接着说,不重复显示说话人
-        let text: String
-        let tail: String       // 非空 = 这段结束后的停顿标记(~~~)
+        var text: String       // 随这个人的后续定稿继续往后长
     }
 
-    /// 静音超过这么久,才在同一人的两段之间显示 ~~~(沿用家里断句阈值 2.4 秒)
+    /// 静音超过这么久,才在同一人的两段之间夹一个 ~(沿用家里断句阈值 2.4 秒)
     private static let gapThreshold: Double = 2.4
 
     private var displayRows: [DisplayRow] {
@@ -241,14 +242,16 @@ struct ContentView: View {
         var prevWho = ""
         for (idx, line) in model.lines.enumerated() {
             let sameSpeaker = (line.who == prevWho)
-            if sameSpeaker, let gap = line.gap, gap >= Self.gapThreshold, !rows.isEmpty {
-                // ~~~ 接在上一段末尾同一行(不再单独占一行、不再切断段落流)
-                let last = rows[rows.count - 1]
-                rows[rows.count - 1] = DisplayRow(id: last.id, who: last.who,
-                                                  text: last.text, tail: Self.gapLabel(gap))
+            if sameSpeaker, !rows.isEmpty {
+                // 同一人:接着上一段往后写;中间停顿 ≥2.4 秒就夹一个 ~(不换行)
+                if let gap = line.gap, gap >= Self.gapThreshold {
+                    rows[rows.count - 1].text += " " + Self.gapLabel(gap)
+                }
+                rows[rows.count - 1].text += line.text
+            } else {
+                // 换人:起新的一段,并显示说话人
+                rows.append(DisplayRow(id: "line-\(idx)", who: displayWho(line.who), text: line.text))
             }
-            rows.append(DisplayRow(id: "line-\(idx)", who: sameSpeaker ? "" : displayWho(line.who),
-                                   text: Self.wrap(line.text), tail: ""))
             prevWho = line.who
         }
         return rows
@@ -260,53 +263,26 @@ struct ContentView: View {
         who.isEmpty ? who : (who == model.identity ? "我" : who)
     }
 
-    /// ~~~ 的文案:超过 30 秒带上时长(用户口径),否则就一个 ~~~。
+    /// 停顿记号(用户口径 2026-10-15:三个 ~~~ 改成**一个半角 ~**):超过 30 秒带上时长。
     private static func gapLabel(_ seconds: Double) -> String {
-        guard seconds >= 30 else { return "~~~" }
+        guard seconds >= 30 else { return "~" }
         let total = Int(seconds.rounded())
         let m = total / 60
         let s = total % 60
-        return s == 0 ? "~~~ \(m)分钟" : "~~~ \(m)分\(s)秒"
+        return s == 0 ? "~ \(m)分钟" : "~ \(m)分\(s)秒"
     }
 
-    /// 同一人一口气说很久时,按标点换行,手机上一眼能读完(约 100 字一段)。
-    /// 只插换行符、不拆成多段 —— 视觉上仍是一段话。
-    private static func wrap(_ text: String, limit: Int = 100) -> String {
-        guard text.count > limit else { return text }
-        var out = ""
-        var sinceBreak = 0
-        for ch in text {
-            out.append(ch)
-            sinceBreak += 1
-            if sinceBreak >= limit {
-                out.append("\n")
-                sinceBreak = 0
-            } else if sinceBreak >= limit - 20, "，。！？；、".contains(ch) {
-                out.append("\n")
-                sinceBreak = 0
-            }
-        }
-        return out
-    }
-
-    private func paragraph(who: String, text: String, tail: String = "", color: Color) -> some View {
+    private func paragraph(who: String, text: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             if !who.isEmpty {
                 Text(who).font(.system(size: 10)).foregroundStyle(.secondary)
             }
-            if tail.isEmpty {
-                Text(text)
-                    .font(.system(size: 15))          // 用户口径 2026-10-15:字幕字号调小 2 号(17 → 15)
-                    .lineSpacing(6)
-                    .foregroundStyle(color)
-                    .textSelection(.enabled)
-            } else {
-                // 停顿标记跟在正文尾部同一行,小一号、灰一点
-                (Text(text).font(.system(size: 15)).foregroundColor(color)
-                 + Text("  " + tail).font(.system(size: 12)).foregroundColor(.secondary))
-                    .lineSpacing(6)
-                    .textSelection(.enabled)
-            }
+            // 字号 15(用户口径 2026-10-15:调小 2 号);长行不干预,交给手机自己排版
+            Text(text)
+                .font(.system(size: 15))
+                .lineSpacing(6)
+                .foregroundStyle(color)
+                .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
