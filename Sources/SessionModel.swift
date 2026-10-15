@@ -141,12 +141,13 @@ final class SessionModel: ObservableObject {
 
     func toggle() { isRecording ? stop() : start() }
 
-    /// 会中提要档位:自动 5 分钟 / 手动 10 分钟(手动更长 —— 用户口径:在外面要等久一点才抓得到要点)。
+    /// 会中提要档位:自动 5 分钟 / 手动 10 分钟(手动更长 —— 在外面要等久一点才抓得到要点)。
     /// 切档 ≠ 立刻出一段:只是把下一次检查的周期换掉。
+    /// 状态行不在这里写"已切到…":按钮的选中色已经表达了档位(用户 2026-10-16 指出重复),
+    /// 真正的状态由家里每 60 秒推来的 sumstatus 决定。
     func setSumMode(_ m: String) {
         guard m != sumMode else { return }
         sumMode = m
-        sumState = (m == "auto") ? "已切到自动 · 5 分钟" : "已切到手动 · 10 分钟"
         note("会中提要档位 → \(m == "auto" ? "自动" : "手动")")
         Task { await room.send(["type": "summode", "mode": m]) }
     }

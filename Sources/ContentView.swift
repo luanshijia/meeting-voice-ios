@@ -252,27 +252,37 @@ struct ContentView: View {
         }
     }
 
-    /// 会中滚动提要(方案 v3,2026-10-15 用户批准):三按钮 + 状态行 + 要点列表。
-    ///   [状态] = 只读仪表盘:显示"为什么这轮没出"(负载闸每条判据都有对应读数);
-    ///   [自动] = 每 5 分钟一档;[手动] = 每 10 分钟一档(比自动长 —— 在外面等久一点再归纳)。
+    /// 会中滚动提要(方案 v3,2026-10-15;界面按用户 2026-10-16 意见调整):
+    ///   [自动]/[手动] = 档位开关(自动 5 分钟 / 手动 10 分钟);几何与第一排按钮完全一致
+    ///                   (1/4 宽、块高 34、图标 + 10pt 小字),右对齐靠到头;未选中灰、选中同第一排的实心蓝;
+    ///   [状态] = 只读:显示"为什么这轮没出"(有序原因链,原因预先写死)。
     /// 没有"到点必出":新增不足 200 字、转写质量不足、机器忙(精转/总结/显存/CPU)→ 状态行给原因。
     private var summaryPanel: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Text("状态").font(.caption).foregroundStyle(.secondary)
-                Button("自动 · 5 分") { model.setSumMode("auto") }
-                    .buttonStyle(.bordered).font(.caption)
-                    .tint(model.sumMode == "auto" ? .blue : .gray)
-                Button("手动 · 10 分") { model.setSumMode("manual") }
-                    .buttonStyle(.bordered).font(.caption)
-                    .tint(model.sumMode == "manual" ? .blue : .gray)
-                Spacer(minLength: 4)
+                // 两个占位块:让档位按钮各占 1/4 宽,和第一排的按钮严格对齐(用户要求宽度一致)
+                Color.clear.frame(maxWidth: .infinity, maxHeight: 34)
+                Color.clear.frame(maxWidth: .infinity, maxHeight: 34)
+                flatButton(icon: "wand.and.stars", title: "自动",
+                           fill: model.sumMode == "auto" ? Color.blue : Color.secondary.opacity(0.25),
+                           fg: model.sumMode == "auto" ? .white : .secondary) { model.setSumMode("auto") }
+                flatButton(icon: "hand.tap", title: "手动",
+                           fill: model.sumMode == "manual" ? Color.blue : Color.secondary.opacity(0.25),
+                           fg: model.sumMode == "manual" ? .white : .secondary) { model.setSumMode("manual") }
+            }
+
+            HStack(spacing: 4) {
+                Text("状态")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
                 Text(model.sumState)
-                    .font(.caption2)
+                    .font(.system(size: 10))
                     .foregroundStyle(sumStateColor)
                     .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 2)
 
             ScrollViewReader { proxy in
                 ScrollView {
