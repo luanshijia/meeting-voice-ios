@@ -157,7 +157,7 @@ struct ContentView: View {
     /// 两处细节(用户口径):① 数字不再压成上下两行;② 底色一路铺到屏幕底边(绕开安全区),
     /// 视觉上就是贴着屏幕圆角底边的一道,而不是浮在中间的一条。
     /// 2026-10-16:整栏已下沉到屏幕底边(ZStack + ignoresSafeArea),这里留 12 点内边距避开 home 指示条。
-    private var bottomBar: some View {
+    /// 2026-10-16:整栏已下沉到屏幕底边(ZStack + ignoresSafeArea);左右各留 24 点(避开屏幕圆角吃字)、
         HStack(spacing: 8) {
             Text(model.status)
                 .font(.system(size: 10))
@@ -173,7 +173,7 @@ struct ContentView: View {
                          (model.recordedSeconds - model.serverSeconds) > 5 ? .red : .green)
             inlineMetric("句", Double(model.lines.count), .primary)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 24)     // iPhone 屏幕四角是圆角:左右各留 24 点,免得最外侧的字被吃掉
         .padding(.top, 3)
         .padding(.bottom, 12)
         .background(
@@ -184,8 +184,8 @@ struct ContentView: View {
     /// 「标签 + 短文本」横向排(网络/麦克风这类状态用)
     private func inlineText(_ label: String, _ value: String, _ color: Color) -> some View {
         HStack(spacing: 3) {
-            Text(label).font(.system(size: 9)).foregroundStyle(.secondary)
-            Text(value).font(.system(size: 11, weight: .medium)).foregroundStyle(color)
+            Text(label).font(.system(size: 10)).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 10, weight: .medium)).foregroundStyle(color)
         }
         .fixedSize()
     }
@@ -193,9 +193,9 @@ struct ContentView: View {
     /// 「标签 + 数字」横向排(以前是标签一行、数字一行,占两行高度)
     private func inlineMetric(_ label: String, _ value: Double, _ color: Color) -> some View {
         HStack(spacing: 3) {
-            Text(label).font(.system(size: 9)).foregroundStyle(.secondary)
+            Text(label).font(.system(size: 10)).foregroundStyle(.secondary)
             Text(value > 0 ? String(format: "%.0f", value) : "—")
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 10, weight: .medium))
                 .monospacedDigit()
                 .foregroundStyle(color)
         }
