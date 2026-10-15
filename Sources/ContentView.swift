@@ -278,6 +278,7 @@ struct ContentView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)   // 显式左对齐:整行不被居中,也不会被挤出边界
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -305,15 +306,16 @@ struct ContentView: View {
         }
     }
 
-    /// 档位按钮:纯文字单行(用户要求不带图标),几何与第一排按钮一致 —— 同字体、同块高 34、同圆角 7。
+    /// 档位按钮:纯文字单行、**矮块**(用户 2026-10-16 要求:高度压到第一排按钮的 50~60%,
+    /// 与「状态」那行文字高度接近,只是略高一点),所以块高 20、圆角 5;宽度仍与第一排同算法(5 等分)。
     private func modeButton(_ title: String, on: Bool, width: CGFloat,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(on ? .white : .primary)
-                .frame(width: width, height: 34)
-                .background(RoundedRectangle(cornerRadius: 7)
+                .frame(width: width, height: 20)
+                .background(RoundedRectangle(cornerRadius: 5)
                     .fill(on ? Color.blue : Color.secondary.opacity(0.25)))
         }
         .buttonStyle(.plain)
