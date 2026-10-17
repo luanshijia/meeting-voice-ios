@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import LiveKit
 
 /// 一句话转写结果(带说话人 —— agent 是按音轨分轨识别后带上 identity 发回来的)。
 struct TranscriptLine: Identifiable {
@@ -31,7 +32,10 @@ final class SessionModel: ObservableObject {
     @Published var micModeText = "读取中"
     @Published var micIsWide = false
     @Published var recordedSeconds: Double = 0     // 本地推流时长
-    @Published var serverSeconds: Double = 0       // 家里已识别到的音频秒数(agent 回传)
+    @Published var serverSeconds: Double = 0       // 家里已识别到的音频秒数(agent 回传,按来源分开记)
+    /// 各来源已识别的秒数。audio_s 是"单条音轨自创建以来"的秒数,
+    /// 直接把任一路的值赋给「收」会让新开的播放轨(回传 5 秒)把麦克风那路(300 秒)压成 5 秒。
+    private var serverBySource: [String: Double] = [:]
 
     // ---- 会中滚动提要(方案 v3,2026-10-15)----
     /// 一轮提要 = 一行时间 + 1~3 条短要点(家里只对"新增"出要点,不重写整段)
@@ -121,6 +125,8 @@ final class SessionModel: ObservableObject {
     /// 连接世代号:每次 start/stop 都 +1。在飞的连接 Task 完成前先核对自己是不是最新一代,
     /// 不是就自己断开、不回写任何 UI —— 否则"连接中点停止再点开始"会让旧 Task 把状态翻回失败。
     private var connectionGeneration = 0
+    /// 这一代真正连上的 Room 实例。断开时只断它 —— 旧任务迟到完成不许碰新会话。
+    private var connection: Room?
     /// 计时的真实起点。以前每 0.5 秒 +0.5,滚动列表时定时器停摆、丢掉的 tick 永远不补。
     private var timerStartedAt: Date?
 
@@ -132,6 +138,7 @@ final class SessionModel: ObservableObject {
             self.status = s
             self.stopTimer()
             self.isRecording = false
+            self.connection = nil        // SDK 已经断了,别再重复断一次
         }
         room.onTranscript = { [weak self] type, who, audioS, text, gap, ts, raw in
             guard let self else { return }
@@ -146,7 +153,7 @@ final class SessionModel: ObservableObject {
                 if let m = raw["mode"] as? String, !m.isEmpty { self.sumMode = m }
                 if let c = raw["code"] as? String, !c.isEmpty { self.sumCode = c }
             case "final":
-                self.serverSeconds = audioS          // 「收」= 家里已识别的音频秒数
+                self.noteProgress(source: raw["source"] as? String ?? "", seconds: audioS)
                 if !text.isEmpty {
                     self.lines.append(TranscriptLine(who: who, source: raw["source"] as? String ?? "",
                                                      text: text, gap: gap, ts: ts))
@@ -154,7 +161,7 @@ final class SessionModel: ObservableObject {
                 }
                 self.clearPartial(source: raw["source"] as? String ?? "", who: who)
             default:
-                self.serverSeconds = audioS
+                self.noteProgress(source: raw["source"] as? String ?? "", seconds: audioS)
                 self.updatePartial(source: raw["source"] as? String ?? "", who: who, text: text)
             }
         }
@@ -185,6 +192,7 @@ final class SessionModel: ObservableObject {
         partials = []
         recordedSeconds = 0
         serverSeconds = 0
+        serverBySource = [:]
         summaries = []                      // 新一场:提要列表与状态区都从零开始
         sumState = "等待提要…"
         sumCode = "wait_period"
@@ -195,15 +203,16 @@ final class SessionModel: ObservableObject {
             if let d = pendingDisconnect { await d.value }   // 等上一次断开落地,避免同身份双连
             pendingDisconnect = nil
             do {
-                try await room.connect(cfg)
+                let live = try await room.connect(cfg)
                 guard generation == self.connectionGeneration else {   // 这一轮已被停止/重开取代
-                    await self.room.disconnect()
+                    await self.room.disconnect(live)                   // 只断自己这条,不碰新会话
                     return
                 }
+                self.connection = live
                 await room.send(["type": "summode", "mode": self.sumMode])   // 让家里跟上本机档位
                 self.startTimer()
             } catch {
-                await self.room.disconnect()   // 连上一半失败(例如开麦被拒)也要把连接收干净,不留同身份影子
+                // VoiceRoom.connect 失败时已自行断开这条连接,这里只回写 UI
                 guard generation == self.connectionGeneration else { return }
                 self.note("连接异常:\(error.localizedDescription)")
                 self.status = "连接失败:\(error.localizedDescription)"
@@ -218,7 +227,13 @@ final class SessionModel: ObservableObject {
         isRecording = false
         status = "已停止:本地推流 \(Int(recordedSeconds)) 秒,家里已识别 \(Int(serverSeconds)) 秒"
         note("用户停止:推流 \(Int(recordedSeconds))s / 家里识别 \(Int(serverSeconds))s")
-        pendingDisconnect = Task { await room.disconnect() }
+        // 只断开"我这一代"的那条连接:旧任务迟到时不会再拿新会话开刀
+        let live = connection
+        connection = nil
+        pendingDisconnect = Task { [weak self] in
+            guard let self, let live else { return }
+            await self.room.disconnect(live)
+        }
     }
 
     private func startTimer() {
@@ -237,6 +252,14 @@ final class SessionModel: ObservableObject {
     }
 
     private func stopTimer() { timer?.invalidate(); timer = nil; timerStartedAt = nil }
+
+    /// 记录某一路的进度并重算「收」:优先麦克风那一路(与手机「录」同一个时钟),没有才取所有来源最大值。
+    private func noteProgress(source: String, seconds: Double) {
+        let key = source.isEmpty ? "unknown" : source
+        serverBySource[key] = max(serverBySource[key] ?? 0, seconds)   // 换轨/重订阅都不许回退
+        let mic = serverBySource.filter { $0.key.hasSuffix("-livekit") }.values.max()
+        serverSeconds = mic ?? serverBySource.values.max() ?? 0
+    }
 
     private func updatePartial(source: String, who: String, text: String) {
         let key = source.isEmpty ? "unknown-\(who)" : source

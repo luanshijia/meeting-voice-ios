@@ -29,26 +29,43 @@ final class VoiceRoom: NSObject {
         }
     }
 
-    func connect(_ cfg: LiveKitConfig) async throws {
+    @discardableResult
+    func connect(_ cfg: LiveKitConfig) async throws -> Room {
         guard let token = cfg.makeToken() else {
             throw NSError(domain: "VoiceMemo", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "token 参数不合法"])
         }
-        let room = Room()
-        room.add(delegate: self)
-        self.room = room
+        let newRoom = Room()
+        newRoom.add(delegate: self)
+        self.room = newRoom
         onNote?("发起连接 \(cfg.url) 身份=\(cfg.identity)")
-        try await room.connect(url: cfg.url, token: token)
-        try await room.localParticipant.setMicrophone(enabled: true)
+        do {
+            try await newRoom.connect(url: cfg.url, token: token)
+            try await newRoom.localParticipant.setMicrophone(enabled: true)
+        } catch {
+            // 连上一半失败(例如开麦被拒)也要把这条连接收干净:不留同身份影子
+            await newRoom.disconnect()
+            if room === newRoom { room = nil }
+            throw error
+        }
         onState?("已连上房间,麦克风已开")
-        onNote?("已连接房间=\(room.name) 参与者=\(room.remoteParticipants.count)")
+        onNote?("已连接房间=\(newRoom.name) 参与者=\(newRoom.remoteParticipants.count)")
+        return newRoom
     }
 
-    func disconnect() async {
-        if let room { onNote?("主动断开") }
-        _ = try? await room?.localParticipant.setMicrophone(enabled: false)
-        await room?.disconnect()
-        room = nil
+    /// 断开指定这一条连接。只清理自己:目标不是当前 `room` 时不动 `self.room`。
+    /// 为什么必须传实例:旧连接任务迟到完成时若执行"断开当前房间",会把后来新建的会话断掉。
+    func disconnect(_ target: Room) async {
+        _ = try? await target.localParticipant.setMicrophone(enabled: false)
+        await target.disconnect()
+        if room === target { room = nil }
+    }
+
+    /// 断开当前连接(兜底入口,正常情况下都走 disconnect(_:))。
+    func disconnectCurrent() async {
+        guard let room else { return }
+        onNote?("主动断开")
+        await disconnect(room)
     }
 }
 
@@ -56,15 +73,15 @@ extension VoiceRoom: RoomDelegate {
     nonisolated func room(_ room: Room, didUpdateConnectionState state: ConnectionState,
                           from oldValue: ConnectionState) {
         Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self, self.room === room else { return }   // 旧实例的回调不许改新会话状态
             self.onState?("连接状态:\(Self.describe(state))")
         }
     }
 
-    nonisolated func room(_: Room, participant _: RemoteParticipant?, didReceiveData data: Data,
+    nonisolated func room(_ room: Room, participant _: RemoteParticipant?, didReceiveData data: Data,
                           forTopic _: String, encryptionType _: EncryptionType) {
         Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self, self.room === room else { return }
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let type = obj["type"] as? String, let text = obj["text"] as? String else { return }
             let who = (obj["who"] as? String) ?? "?"
@@ -75,15 +92,17 @@ extension VoiceRoom: RoomDelegate {
         }
     }
 
-    nonisolated func room(_: Room, didFailToConnectWithError error: LiveKitError?) {
+    nonisolated func room(_ room: Room, didFailToConnectWithError error: LiveKitError?) {
         Task { @MainActor [weak self] in
-            self?.onEnded?("连接失败:" + (error?.description ?? "未知"))
+            guard let self, self.room === room else { return }
+            self.onEnded?("连接失败:" + (error?.description ?? "未知"))
         }
     }
 
-    nonisolated func room(_: Room, didDisconnectWithError error: LiveKitError?) {
+    nonisolated func room(_ room: Room, didDisconnectWithError error: LiveKitError?) {
         Task { @MainActor [weak self] in
-            self?.onEnded?(error.map { "连接断开:" + $0.description } ?? "连接已断开")
+            guard let self, self.room === room else { return }
+            self.onEnded?(error.map { "连接断开:" + $0.description } ?? "连接已断开")
         }
     }
 
