@@ -101,14 +101,16 @@ struct ContentView: View {
     private var extButton: some View {
         HStack(spacing: 3) {
             BroadcastPickerView()
-                .frame(width: 24, height: 24)
+                // ReplayKit 系统控件以 44x44 点参与布局,不能只压缩 SwiftUI 外框;
+                // 否则 UIKit 内部按钮会溢出 24 点槽,与右侧状态圆挤在一起。
+                .frame(width: 44, height: 44)
                 .accessibilityLabel("开始或停止系统声音直播")
             Circle()
                 .fill(extStatusColor)
                 .frame(width: 23, height: 23)
                 .accessibilityLabel(extStatusDescription)
         }
-        .frame(maxWidth: .infinity, minHeight: 24, maxHeight: 24)
+        .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44)
         // 不再加 .padding(.horizontal, 4):它让这一组比五等分槽宽出 8pt,
         // 等分重分配时把图标整体推右(实测组中心 840.5 vs 区间中点 832.5 @3x,偏右 8px);
         // 去掉后按槽居中即等于「开启」右缘与「设置」左缘的中点(用户口径 2026-10-17)。
