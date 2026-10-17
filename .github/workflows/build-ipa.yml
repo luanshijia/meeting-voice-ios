@@ -33,6 +33,33 @@ jobs:
           xcodegen generate
           ls -la
 
+      - name: 模拟器启动并截取主界面(仅手动运行)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          DEVICE_ID="$(xcrun simctl list devices available -j | jq -r '[.devices[][] | select(.name == "iPhone 16 Pro")][0].udid // empty')"
+          if [ -z "$DEVICE_ID" ]; then
+            DEVICE_ID="$(xcrun simctl list devices available -j | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].udid // empty')"
+          fi
+          test -n "$DEVICE_ID"
+          xcrun simctl boot "$DEVICE_ID" || true
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+          xcodebuild \
+            -project VoiceMemo.xcodeproj \
+            -scheme VoiceMemo \
+            -configuration Release \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -derivedDataPath "$RUNNER_TEMP/VoiceMemo-simulator" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+          APP="$RUNNER_TEMP/VoiceMemo-simulator/Build/Products/Release-iphonesimulator/VoiceMemo.app"
+          test -d "$APP"
+          xcrun simctl install "$DEVICE_ID" "$APP"
+          xcrun simctl launch "$DEVICE_ID" com.luanshijia.voicememo
+          sleep 5
+          mkdir -p "$RUNNER_TEMP/VoiceMemo-ui-preview"
+          xcrun simctl io "$DEVICE_ID" screenshot "$RUNNER_TEMP/VoiceMemo-ui-preview/main.png"
+
       - name: 编译(不签名)
         run: |
           set -o pipefail
@@ -89,4 +116,12 @@ jobs:
         with:
           name: VoiceMemo-unsigned-ipa
           path: ${{ runner.temp }}/ipa/VoiceMemo-unsigned.ipa
+          if-no-files-found: error
+
+      - name: 上传模拟器界面截图(仅手动运行)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoiceMemo-ui-preview
+          path: ${{ runner.temp }}/VoiceMemo-ui-preview/main.png
           if-no-files-found: error
