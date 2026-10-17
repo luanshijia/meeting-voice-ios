@@ -118,6 +118,11 @@ final class SessionModel: ObservableObject {
     /// 服务端按 DUPLICATE_IDENTITY 把旧的那条踢掉(01:44:33 就是这么发生的)。
     /// 所以下次连接前必须先等它落地。
     private var pendingDisconnect: Task<Void, Never>?
+    /// 连接世代号:每次 start/stop 都 +1。在飞的连接 Task 完成前先核对自己是不是最新一代,
+    /// 不是就自己断开、不回写任何 UI —— 否则"连接中点停止再点开始"会让旧 Task 把状态翻回失败。
+    private var connectionGeneration = 0
+    /// 计时的真实起点。以前每 0.5 秒 +0.5,滚动列表时定时器停摆、丢掉的 tick 永远不补。
+    private var timerStartedAt: Date?
 
     init() {
         room.onState = { [weak self] s in self?.status = s }
@@ -145,6 +150,7 @@ final class SessionModel: ObservableObject {
                 if !text.isEmpty {
                     self.lines.append(TranscriptLine(who: who, source: raw["source"] as? String ?? "",
                                                      text: text, gap: gap, ts: ts))
+                    if self.lines.count > 4000 { self.lines.removeFirst(self.lines.count - 4000) }
                 }
                 self.clearPartial(source: raw["source"] as? String ?? "", who: who)
             default:
@@ -173,6 +179,8 @@ final class SessionModel: ObservableObject {
     }
 
     private func start() {
+        connectionGeneration += 1
+        let generation = connectionGeneration
         lines = []
         partials = []
         recordedSeconds = 0
@@ -188,9 +196,15 @@ final class SessionModel: ObservableObject {
             pendingDisconnect = nil
             do {
                 try await room.connect(cfg)
+                guard generation == self.connectionGeneration else {   // 这一轮已被停止/重开取代
+                    await self.room.disconnect()
+                    return
+                }
                 await room.send(["type": "summode", "mode": self.sumMode])   // 让家里跟上本机档位
                 self.startTimer()
             } catch {
+                await self.room.disconnect()   // 连上一半失败(例如开麦被拒)也要把连接收干净,不留同身份影子
+                guard generation == self.connectionGeneration else { return }
                 self.note("连接异常:\(error.localizedDescription)")
                 self.status = "连接失败:\(error.localizedDescription)"
                 self.isRecording = false
@@ -199,6 +213,7 @@ final class SessionModel: ObservableObject {
     }
 
     private func stop() {
+        connectionGeneration += 1     // 在飞的连接尝试作废,不许它稍后回写状态
         stopTimer()
         isRecording = false
         status = "已停止:本地推流 \(Int(recordedSeconds)) 秒,家里已识别 \(Int(serverSeconds)) 秒"
@@ -209,12 +224,19 @@ final class SessionModel: ObservableObject {
     private func startTimer() {
         stopTimer()
         recordedSeconds = 0
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.recordedSeconds += 0.5 }
+        timerStartedAt = Date()
+        // .common 模式:滚动字幕时定时器不停;publish 的秒数按真实时间差算,漏掉的 tick 自动补回来
+        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let start = self.timerStartedAt else { return }
+                self.recordedSeconds = Date().timeIntervalSince(start)
+            }
         }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
-    private func stopTimer() { timer?.invalidate(); timer = nil }
+    private func stopTimer() { timer?.invalidate(); timer = nil; timerStartedAt = nil }
 
     private func updatePartial(source: String, who: String, text: String) {
         let key = source.isEmpty ? "unknown-\(who)" : source
@@ -232,8 +254,10 @@ final class SessionModel: ObservableObject {
     }
 
     private func clearPartial(source: String, who: String) {
-        let key = source.isEmpty ? "unknown-\(who)" : source
-        partials.removeAll { $0.id == key }
+        // 两把 key 都清:partial 侧 source 为空时会退化成 unknown-<who>,
+        // 而 final 侧的 source 有值时 key 是 source —— 只清一种就会把已定稿的旧话永久留在第一遍区。
+        let keys: Set<String> = [source.isEmpty ? "unknown-\(who)" : source, "unknown-\(who)"]
+        partials.removeAll { keys.contains($0.id) }
     }
 
     private static func stamp() -> String {

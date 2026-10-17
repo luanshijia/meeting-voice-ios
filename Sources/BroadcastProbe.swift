@@ -85,6 +85,22 @@ enum BroadcastProbe {
     enum Phase { case stopped, waiting, receiving, error }
     struct Status { let phase: Phase; let isActive: Bool; let appFrames: Int }
 
+    /// audioApp 计数的增量基线。整场累计值涨不动,才说明那一路真的停了 ——
+    /// 用累计值判活(旧写法)会把"中途死掉的系统声轨"一直显示成在收。
+    private static let sampleLock = NSLock()
+    private static var lastAppFrames = 0
+    private static var lastAppFramesAt = Date.distantPast
+
+    private static func noteAppFrames(_ frames: Int) -> Bool {
+        sampleLock.lock(); defer { sampleLock.unlock() }
+        if frames != lastAppFrames {          // 涨了或新一轮从 0 重数,都算"还活着"
+            lastAppFrames = frames
+            lastAppFramesAt = Date()
+            return true
+        }
+        return false
+    }
+
     /// 仅解读最近一次广播生命周期，避免旧日志计数把新一轮状态染绿。
     /// 必须看到 LiveKit 已连接且本轮 audioApp 帧数大于零，才报告“正在收声”。
     static func status() -> Status {
@@ -123,7 +139,12 @@ enum BroadcastProbe {
         let formatter = ISO8601DateFormatter()
         let heartbeatAge = formatter.date(from: timestamp).map { Date().timeIntervalSince($0) } ?? .infinity
         let stale = !paused && heartbeatAge > 15
-        let phase: Phase = failed || stale ? .error : (connected && sentAudio && frames > 0 && !paused ? .receiving : .waiting)
+        // 第二重判活:screen 帧一直在跳(所以 heartbeat 新鲜),但 audioApp 计数 12 秒没涨 = 系统声那一路死了。
+        let audioFresh = Self.noteAppFrames(frames)
+        let stalled = connected && frames > 0 && !paused && !audioFresh
+            && Date().timeIntervalSince(Self.lastAppFramesAt) > 12
+        let phase: Phase = failed || stale || stalled ? .error
+            : (connected && sentAudio && frames > 0 && !paused ? .receiving : .waiting)
         // isActive 必须由 phase 推导:stale/failed 时主 App 要重新补写广播 token,并把按钮显示成未开播。
         // 以前恒为 true,日志里残留一条"扩展启动"就会让主 App 永远不再补写 token,下一次开播直接"配置缺失"。
         return Status(phase: phase, isActive: phase != .error, appFrames: frames)

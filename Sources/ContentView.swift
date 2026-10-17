@@ -345,7 +345,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 4)
                 }
-                .onChange(of: model.summaries.count) { _, _ in
+                .onChange(of: model.summaries.last?.id) { _, _ in
                     guard let last = model.summaries.last else { return }
                     proxy.scrollTo(last.id, anchor: .bottom)
                 }
@@ -468,7 +468,7 @@ struct ContentView: View {
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 3_000_000_000)   // 每 3 秒看一次扩展状态 + 麦克风模式
             await refreshExt()
-            if tick % 100 == 0 && !broadcastAlive { _ = model.prepareBroadcast() } // 5 分钟刷新一次 15 分钟 token
+            if tick % 100 == 0 { _ = model.prepareBroadcast() }  // 每 5 分钟重写一次广播 token:文件被扩展读走就删了,重开必须还有一份
             model.refreshMicMode()
             tick += 1
             if tick % 5 == 0 { await refreshNet() }             // 每 15 秒顺手探一次网络

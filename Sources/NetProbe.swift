@@ -38,6 +38,8 @@ enum NetProbe {
     /// 从设置页里的 ws://100.64.0.2:7880 取出主机和端口
     static func hostPort(from serverURL: String) -> (host: String, port: UInt16)? {
         guard let comps = URLComponents(string: serverURL), let host = comps.host else { return nil }
-        return (host, UInt16(comps.port ?? 7880))
+        // UInt16(Int) 越界会直接崩:设置页里把端口写成 99999 这种就是在下次启动时闪退
+        guard let port = UInt16(exactly: comps.port ?? 7880) else { return nil }
+        return (host, port)
     }
 }
