@@ -1,9 +1,7 @@
 import SwiftUI
 import ReplayKit
 
-/// 广播扩展探针(阶段二前置):主 App 侧的读回与启动入口。
-/// 它不参与录音链路,只在设置页里回答一个问题:
-/// 「带扩展的包装上之后,App Group 能不能用、扩展到底有没有收到音频」。
+/// 广播扩展状态读回与系统启动入口；读 App Group 状态日志，不参与音频传输。
 enum BroadcastProbe {
     static let groupID = "group.com.luanshijia.voicememo"
     static let extensionBundleID = "com.luanshijia.voicememo.broadcast"
@@ -85,14 +83,12 @@ enum BroadcastProbe {
         return alive
     }
 
-    /// 扩展最近一次记下的麦克风采样帧数(>0 = 确实收到麦克风音频)。
-    /// 用途:主界面「扩展」按钮变红 —— 只有真拿到麦克风输入,才敢说"麦克风开着"。
-    /// 蓝色是留给"已开播但还没看到麦克风输入"的:那是不确定状态,不硬下结论。
-    static func micFramesSeen() -> Int {
+    /// 扩展最近一次记下的系统声音采样帧数(>0 = ReplayKit 已交付 audioApp)。
+    static func appFramesSeen() -> Int {
         guard let url = containerURL()?.appendingPathComponent(fileName) else { return 0 }
         var last = 0
         for line in tailText(url: url, bytes: 16384).split(separator: "\n") where line.contains("计数 回调") {
-            guard let marker = line.range(of: "audioMic=") else { continue }
+            guard let marker = line.range(of: "audioApp=") else { continue }
             let digits = line[marker.upperBound...].prefix { $0.isNumber }
             if let value = Int(digits) { last = value }
         }
@@ -224,7 +220,7 @@ struct ExtLogSection: View {
         } header: {
             Text("扩展日志")
         } footer: {
-            Text("扩展每 3 秒写一行:计数、采样格式、App Group 组名、5A(对方声音)发送状态。主界面「扩展」按钮的三色判断也读这份文件。")
+            Text("扩展记录 LiveKit 连接、audioApp 格式与发送计数。主界面「扩展」按钮按系统声音是否到达显示状态。")
         }
         .onAppear { load() }
     }

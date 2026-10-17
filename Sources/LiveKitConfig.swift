@@ -35,11 +35,35 @@ struct LiveKitConfig {
 
     /// 铸 token。返回 nil 表示参数不合法。
     func makeToken(ttl: TimeInterval = 12 * 3600) -> String? {
+        makeToken(identity: identity, canSubscribe: true, ttl: ttl)
+    }
+
+    /// 在主 App 内为广播扩展铸造短期、仅发布的 token；扩展不需要持有 API secret。
+    func prepareBroadcast() throws {
+        guard let container = BroadcastProbe.containerURL() else {
+            throw NSError(domain: "VoiceMemo", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "App Group 不可用，扩展无法读取广播配置"])
+        }
+        let broadcastIdentity = device + "-replaykit"
+        guard let token = makeToken(identity: broadcastIdentity, canSubscribe: false, ttl: 15 * 60) else {
+            throw NSError(domain: "VoiceMemo", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "无法生成广播扩展 token"])
+        }
+        let payload: [String: String] = [
+            "url": url,
+            "identity": broadcastIdentity,
+            "token": token,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        try data.write(to: container.appendingPathComponent("broadcast-livekit.json"), options: .atomic)
+    }
+
+    private func makeToken(identity: String, canSubscribe: Bool, ttl: TimeInterval) -> String? {
         let now = Int(Date().timeIntervalSince1970)
         let header: [String: Any] = ["alg": "HS256", "typ": "JWT"]
         let payload: [String: Any] = [
             "iss": apiKey, "sub": identity, "nbf": now - 10, "exp": now + Int(ttl), "name": identity,
-            "video": ["room": "test", "roomJoin": true, "canPublish": true, "canSubscribe": true],
+            "video": ["room": "test", "roomJoin": true, "canPublish": true, "canSubscribe": canSubscribe],
         ]
         guard let h = Self.json(header), let p = Self.json(payload) else { return nil }
         let signing = "\(h).\(p)"

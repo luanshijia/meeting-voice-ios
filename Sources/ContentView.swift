@@ -6,7 +6,7 @@ import UIKit
 ///   网络 = 能不能连上家里(蓝=通 / 灰=不通或没测)
 ///   宽谱 = 当前麦克风是否宽谱模式(蓝=是 / 灰=否或未授权);点它弹系统「麦克风模式」面板
 ///   开启 = 录音开关(红=录着)
-///   扩展 = 系统直播三态(灰=确定没开播 / 蓝=已开播但没看到麦克风输入,是猜的 / 红=确定收到麦克风输入)
+///   扩展 = 系统直播三态(灰=确定没开播 / 蓝=已开播但没收到系统声 / 红=已收到系统声)
 ///   设置 = 连接参数、日志排错、黑匣子
 /// 中间:三块固定高度 —— 上 1/10 第一遍(蓝,流式)、中 1/2 第二遍定稿(黑)、下 4/10 会中提要
 ///   (档位按钮 + 状态行 + 要点列表,见 `summaryPanel`)。
@@ -19,7 +19,7 @@ struct ContentView: View {
     // 顶部按钮状态
     @State private var netOK: Bool? = nil            // nil = 还没测过
     @State private var broadcastAlive = false        // 扩展写过「=== 扩展启动」且没写「结束」
-    @State private var broadcastMicFrames = 0        // 扩展记下的麦克风采样帧数
+    @State private var broadcastAppFrames = 0        // 扩展记下的系统声音采样帧数
 
     var body: some View {
         // 底部那一行(未连接 / 网络 断 / 麦克风 … / 录 收 句)改成**真正贴屏幕底边**:
@@ -88,8 +88,7 @@ struct ContentView: View {
     }
 
     /// 扩展:点它调出系统直播选择器。
-    /// 三态颜色:灰=确定没开播;蓝=已开播但还没看到麦克风输入(不确定,是猜的);红=确定收到麦克风输入。
-    /// 为什么只能猜:系统那个「麦克风」开关的状态 App 读不到(iOS 没给接口),只能靠扩展有没有收到音频反推。
+    /// 三态颜色:灰=未开播;蓝=已开播但未收到系统声;红=已收到系统声。
     private var extButton: some View {
         ZStack {
             // 系统组件藏到最底层(1% 透明):它的外观不能改,只负责被下面那个按钮程序触发
@@ -97,7 +96,9 @@ struct ContentView: View {
                 .frame(width: 44, height: 44)
                 .opacity(0.01)
             Button {
-                BroadcastPickerTrigger.open()
+                if model.prepareBroadcast() {
+                    BroadcastPickerTrigger.open()
+                }
             } label: {
                 buttonLabel(icon: "dot.radiowaves.left.and.right", title: extTitle,
                             fg: broadcastAlive ? .white : .primary)
@@ -112,12 +113,12 @@ struct ContentView: View {
     /// 整块底色随状态变(用户要求:不要只有边框变色)
     private var extFill: Color {
         if !broadcastAlive { return Color.secondary.opacity(0.25) }  // 灰:确定没开播
-        return broadcastMicFrames > 0 ? Color.red : Color.blue       // 红:确定收到麦克风 / 蓝:不确定
+        return broadcastAppFrames > 0 ? Color.red : Color.blue       // 红:扩展已收到系统声
     }
 
     private var extTitle: String {
         if !broadcastAlive { return "扩展" }
-        return broadcastMicFrames > 0 ? "扩展·收" : "扩展·?"
+        return broadcastAppFrames > 0 ? "扩展·收" : "扩展·等"
     }
 
     /// 设置:配色统一成「宽谱」「开启」那档实心深蓝(用户口径 2026-10-15 晚;以前是浅蓝 0.18)。
@@ -411,7 +412,7 @@ struct ContentView: View {
 
     private func refreshExt() async {
         broadcastAlive = BroadcastProbe.isBroadcasting()
-        broadcastMicFrames = BroadcastProbe.micFramesSeen()
+        broadcastAppFrames = BroadcastProbe.appFramesSeen()
     }
 
     private func refreshNet() async {
@@ -497,7 +498,7 @@ struct SettingsSheet: View {
         } header: {
             Text("排错")
         } footer: {
-            Text("顺序:①「网络」按钮看路通不通;②「扩展」按钮看扩展起没起、麦克风有没有在收(灰/蓝/红三态);③点这里复制,贴回来给我。")
+            Text("顺序:①「网络」按钮看路通不通;②「扩展」按钮启动系统声音采集(灰/蓝/红三态);③点这里复制,贴回来给我。")
         }
     }
 

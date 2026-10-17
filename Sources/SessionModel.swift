@@ -93,6 +93,18 @@ final class SessionModel: ObservableObject {
         objectWillChange.send()
     }
 
+    @discardableResult
+    func prepareBroadcast() -> Bool {
+        do {
+            try cfg.prepareBroadcast()
+            note("已为 \(cfg.device)-replaykit 准备单独发布权限")
+            return true
+        } catch {
+            note("扩展配置失败: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     private var cfg = LiveKitConfig.load()
     private let room = VoiceRoom()
     private var timer: Timer?
