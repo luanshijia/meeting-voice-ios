@@ -48,13 +48,21 @@ enum BroadcastProbe {
         return matchedGroup ?? "?"
     }
 
-    static func readLog(maxLines: Int = 60) -> String {
+    /// 读探针日志:**容错解码**(第 4 条,2026-10-17)。
+    /// 原来用 `String(contentsOf:encoding:.utf8)` 做整份严格解码 —— 文件里只要有一处非法字节
+    /// (扩展写到一半被读、或扩展被系统回收时留下半个汉字)就 `try?` 失败、静默返回 "",
+    /// 设置页整块变空白,而且和「压根没有日志」长得一模一样,查不出是哪一种。
+    /// 现在与 `tailText` 走同一条路:`String(decoding:as:UTF8.self)`,坏字节变替换符,不再整份丢弃;
+    /// 同时把诊断值(字节数 / 行数 / 替换符个数)一并返回,让「读了但内容坏」在界面上看得见。
+    static func logSnapshot(maxLines: Int = 60) -> (text: String, bytes: Int, lines: Int, badChars: Int) {
         guard let url = containerURL()?.appendingPathComponent(fileName),
-              let text = try? String(contentsOf: url, encoding: .utf8) else {
-            return ""          // 没日志就是空字符串(以前返回一句「扩展从未启动过…」的猜测,已删)
+              let data = try? Data(contentsOf: url) else {
+            return ("", 0, 0, 0)       // 没日志 / App Group 不可用:四值全零,界面据此说明是哪一种
         }
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        return lines.suffix(maxLines).joined(separator: "\n")
+        let text = String(decoding: data, as: UTF8.self)
+        let badChars = text.reduce(0) { $1 == "\u{FFFD}" ? $0 + 1 : $0 }
+        let all = text.split(separator: "\n", omittingEmptySubsequences: false)
+        return (all.suffix(maxLines).joined(separator: "\n"), data.count, all.count, badChars)
     }
 
     static func clearLog() {
@@ -91,10 +99,12 @@ enum BroadcastProbe {
         return last
     }
 
-    /// 整份探针日志(设置页「复制日志」用),带上限免得把大文件全读进内存
+    /// 整份探针日志(设置页「复制排错信息」用),带上限免得把大文件全读进内存
+    /// 第 4 条(2026-10-17):这里原来也是严格解码 —— 日志一坏,连排错路径一起哑,故与 readLog 一并改成容错。
     static func fullLogText(limit: Int = 200_000) -> String {
         guard let url = containerURL()?.appendingPathComponent(fileName),
-              let text = try? String(contentsOf: url, encoding: .utf8) else { return "" }
+              let data = try? Data(contentsOf: url) else { return "" }
+        let text = String(decoding: data, as: UTF8.self)
         return text.count > limit ? String(text.suffix(limit)) : text
     }
 
@@ -180,6 +190,8 @@ struct ExtensionRow: View {
 /// (以前那句「还没有探针日志:扩展从未启动过,或 App Group 不可用」已失效,按要求删掉)
 struct ExtLogSection: View {
     @State private var logText = ""
+    @State private var logStatus = ""
+    @State private var statusWarn = false
     @State private var refreshedAt = ""
 
     var body: some View {
@@ -199,6 +211,13 @@ struct ExtLogSection: View {
                 Button("清空") { BroadcastProbe.clearLog(); load() }
                     .foregroundStyle(.red)
             }
+            // 第 4 条(2026-10-17):读完必须说清「读到什么」——
+            // 以前读失败与没有日志都表现为这块整块不显示,分不清是哪种,只能靠猜。
+            if !logStatus.isEmpty {
+                Text(logStatus)
+                    .font(.system(size: 10))
+                    .foregroundStyle(statusWarn ? Color.orange : Color.secondary)
+            }
             if !refreshedAt.isEmpty {
                 Text(refreshedAt).font(.system(size: 10)).foregroundStyle(.secondary)
             }
@@ -211,7 +230,18 @@ struct ExtLogSection: View {
     }
 
     private func load() {
-        logText = BroadcastProbe.readLog()
+        let snap = BroadcastProbe.logSnapshot()
+        logText = snap.text
+        if snap.bytes == 0 {
+            logStatus = "未读到日志(文件不存在,或 App Group 不可用)"
+            statusWarn = true
+        } else if snap.badChars > 0 {
+            logStatus = "已读 \(snap.lines) 行 · \(snap.bytes) 字节 · \(snap.badChars) 处坏字节(已按替换符显示)"
+            statusWarn = true
+        } else {
+            logStatus = "已读 \(snap.lines) 行 · \(snap.bytes) 字节"
+            statusWarn = false
+        }
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss"
         refreshedAt = "读取于 \(f.string(from: Date()))"
