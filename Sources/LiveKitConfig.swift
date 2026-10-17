@@ -9,7 +9,7 @@ struct LiveKitConfig {
     static let defaultURL = "wss://100.64.0.2:7443"   // 经本地 TLS 代理(ATS 要求 wss)
     static let defaultKey = "devkey"
     static let defaultSecret = "secret"
-    static let defaultDevice = "luan-iphone"
+    static let defaultDevice = "iphone"          // C 口径:公开仓库里不写自己的设备名(IP 留作开箱即用)
 
     var url: String
     var apiKey: String
