@@ -36,6 +36,10 @@ final class SessionModel: ObservableObject {
     /// 各来源已识别的秒数。audio_s 是"单条音轨自创建以来"的秒数,
     /// 直接把任一路的值赋给「收」会让新开的播放轨(回传 5 秒)把麦克风那路(300 秒)压成 5 秒。
     private var serverBySource: [String: Double] = [:]
+    /// 每一路上报的墙钟时间:判断它是不是"已经很久没更新",用来区分「乱序小值」和「重连后从 0 重计」
+    private var progressSeenAt: [String: Date] = [:]
+    /// 见过的未知消息类型:每种只提示一次,不刷屏
+    private var unknownTypes = Set<String>()
 
     // ---- 会中滚动提要(方案 v3,2026-10-15)----
     /// 一轮提要 = 一行时间 + 1~3 条短要点(家里只对"新增"出要点,不重写整段)
@@ -160,9 +164,15 @@ final class SessionModel: ObservableObject {
                     if self.lines.count > 4000 { self.lines.removeFirst(self.lines.count - 4000) }
                 }
                 self.clearPartial(source: raw["source"] as? String ?? "", who: who)
-            default:
+            case "partial":
                 self.noteProgress(source: raw["source"] as? String ?? "", seconds: audioS)
                 self.updatePartial(source: raw["source"] as? String ?? "", who: who, text: text)
+            default:
+                // 未知 type 不许当流式字幕:以前 default 兜底 + 空文本会把 partial 清空。
+                // 新协议字段先记一行提示(每种一次),等 App 更新后再认。
+                if self.unknownTypes.insert(type).inserted {
+                    self.note("收到未知消息 type=\(type),已忽略")
+                }
             }
         }
         // 从 Bundle 读真实版本(以前写死成 v0.2.0(build 11),截图里会误导人)
@@ -193,6 +203,8 @@ final class SessionModel: ObservableObject {
         recordedSeconds = 0
         serverSeconds = 0
         serverBySource = [:]
+        progressSeenAt = [:]                // 新一场:进度墙钟与未知 type 提示都重置
+        unknownTypes = []
         summaries = []                      // 新一场:提要列表与状态区都从零开始
         sumState = "等待提要…"
         sumCode = "wait_period"
@@ -256,7 +268,13 @@ final class SessionModel: ObservableObject {
     /// 记录某一路的进度并重算「收」:优先麦克风那一路(与手机「录」同一个时钟),没有才取所有来源最大值。
     private func noteProgress(source: String, seconds: Double) {
         let key = source.isEmpty ? "unknown" : source
-        serverBySource[key] = max(serverBySource[key] ?? 0, seconds)   // 换轨/重订阅都不许回退
+        let now = Date()
+        let previous = serverBySource[key] ?? 0
+        // 重连/换轨后服务端 audio_s 从 0 重计:以前一律 max(),「收」就卡在旧高水位,
+        // "落后 >5 秒变红"永远不响。判据:这一路 10 秒没上报=旧值已不可信,允许回退。
+        let stale = now.timeIntervalSince(progressSeenAt[key] ?? .distantPast) > 10
+        serverBySource[key] = (seconds < previous && !stale) ? previous : seconds
+        progressSeenAt[key] = now
         let mic = serverBySource.filter { $0.key.hasSuffix("-livekit") }.values.max()
         serverSeconds = mic ?? serverBySource.values.max() ?? 0
     }

@@ -7,6 +7,10 @@ import LiveKit
 final class VoiceRoom: NSObject {
     private var room: Room?
 
+    /// 主动断开标记:我们自己调 disconnect 时 SDK 也会回调 didDisconnectWithError,
+    /// 以前那条回调会把状态从"已停止"改成"连接已断开"(UI 上看着像异常掉线)。
+    private var intentionalDisconnect = false
+
     var onState: ((String) -> Void)?
     var onNote: ((String) -> Void)?
     /// (类型 partial/final/summary, 说话人, 服务端已识别的音频秒数, 文字, 前面静了多久, 绝对时间戳)
@@ -56,6 +60,7 @@ final class VoiceRoom: NSObject {
     /// 断开指定这一条连接。只清理自己:目标不是当前 `room` 时不动 `self.room`。
     /// 为什么必须传实例:旧连接任务迟到完成时若执行"断开当前房间",会把后来新建的会话断掉。
     func disconnect(_ target: Room) async {
+        intentionalDisconnect = true
         _ = try? await target.localParticipant.setMicrophone(enabled: false)
         await target.disconnect()
         if room === target { room = nil }
@@ -83,7 +88,9 @@ extension VoiceRoom: RoomDelegate {
         Task { @MainActor [weak self] in
             guard let self, self.room === room else { return }
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let type = obj["type"] as? String, let text = obj["text"] as? String else { return }
+                  let type = obj["type"] as? String else { return }
+            // text 缺省视为空串:控制类消息(新协议字段)不带 text 时,整条丢掉等于状态永远不更新
+            let text = (obj["text"] as? String) ?? ""
             let who = (obj["who"] as? String) ?? "?"
             let audioS = (obj["audio_s"] as? Double) ?? 0
             let gap = obj["gap_s"] as? Double          // JSON null / 老服务端缺字段 → nil
@@ -95,6 +102,7 @@ extension VoiceRoom: RoomDelegate {
     nonisolated func room(_ room: Room, didFailToConnectWithError error: LiveKitError?) {
         Task { @MainActor [weak self] in
             guard let self, self.room === room else { return }
+            if self.consumeIntentionalDisconnect() { return }      // 自己停的,不算连接失败
             self.onEnded?("连接失败:" + (error?.description ?? "未知"))
         }
     }
@@ -102,8 +110,18 @@ extension VoiceRoom: RoomDelegate {
     nonisolated func room(_ room: Room, didDisconnectWithError error: LiveKitError?) {
         Task { @MainActor [weak self] in
             guard let self, self.room === room else { return }
+            if self.consumeIntentionalDisconnect() {               // 自己停的:只更新状态,别覆盖"已停止"
+                self.onState?("已断开(主动停止)")
+                return
+            }
             self.onEnded?(error.map { "连接断开:" + $0.description } ?? "连接已断开")
         }
+    }
+
+    /// 取走"主动断开"标记(只对最近一次断开有效)。
+    private func consumeIntentionalDisconnect() -> Bool {
+        defer { intentionalDisconnect = false }
+        return intentionalDisconnect
     }
 
     private static func describe(_ s: ConnectionState) -> String {
