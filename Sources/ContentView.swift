@@ -97,16 +97,16 @@ struct ContentView: View {
         }
     }
 
-    /// 扩展区:左侧独立状态圆点,右侧 iOS 原生直播选择器；两个圆形控件等大。
+    /// 扩展区:iOS 原生直播选择器在前,状态圆点在后；两者作为一组居中且等大。
     private var extButton: some View {
         HStack(spacing: 4) {
+            BroadcastPickerView()
+                .frame(width: 24, height: 24)
+                .accessibilityLabel("开始或停止系统声音直播")
             Circle()
                 .fill(extStatusColor)
                 .frame(width: 24, height: 24)
                 .accessibilityLabel(extStatusDescription)
-            BroadcastPickerView()
-                .frame(width: 24, height: 24)
-                .accessibilityLabel("开始或停止系统声音直播")
         }
         .frame(maxWidth: .infinity, minHeight: 24, maxHeight: 24)
     }
