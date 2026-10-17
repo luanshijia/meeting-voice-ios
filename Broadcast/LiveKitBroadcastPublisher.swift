@@ -4,7 +4,9 @@ import Foundation
 import LiveKit
 
 /// Broadcast Upload Extension's independent LiveKit participant for ReplayKit audioApp.
-final class LiveKitBroadcastPublisher {
+/// 必须是 NSObject + RoomDelegate:连接死了要有人知道 —— 以前没有任何 delegate,
+/// 断线后扩展照样往死连接里塞音频,主 App 的圆点仍显示"正在接收并发送",整场系统声静默丢失。
+final class LiveKitBroadcastPublisher: NSObject, RoomDelegate {
     private struct Configuration: Decodable {
         let url: String
         let identity: String
@@ -34,6 +36,24 @@ final class LiveKitBroadcastPublisher {
 
     init(log: @escaping (String) -> Void) {
         self.log = log
+        super.init()
+    }
+
+    // MARK: - RoomDelegate
+    // 这两个回调是扩展侧唯一的"连接已死"信号:BroadcastProbe 的失败清单认 "LiveKit 连接断开",
+    // 主 App 据此把 phase 判成 error → 圆点变橙、按钮变"未开播",并立刻补写下一个 token。
+
+    func room(_ room: Room, didDisconnectWithError error: LiveKitError?) {
+        log("LiveKit 连接断开: \(error?.description ?? "对端关闭")")
+        workQueue.async {
+            self.ready = false                     // 别再往死连接里送 PCM
+            self.pending.removeAll(keepingCapacity: false)
+        }
+    }
+
+    func room(_ room: Room, didFailToConnectWithError error: LiveKitError?) {
+        log("LiveKit 连接断开: 连接失败 \(error?.description ?? "未知")")
+        workQueue.async { self.ready = false }
     }
 
     func start() {
@@ -85,7 +105,9 @@ final class LiveKitBroadcastPublisher {
     }
 
     private func connect(_ configuration: Configuration) async {
-        let newRoom = Room()
+        let room = Room()
+        room.add(delegate: self)
+        let newRoom = room
         do {
             try await newRoom.connect(url: configuration.url, token: configuration.token)
             try AudioManager.shared.setManualRenderingMode(true)

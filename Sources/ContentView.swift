@@ -468,7 +468,10 @@ struct ContentView: View {
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 3_000_000_000)   // 每 3 秒看一次扩展状态 + 麦克风模式
             await refreshExt()
-            if tick % 100 == 0 { _ = model.prepareBroadcast() }  // 每 5 分钟重写一次广播 token:文件被扩展读走就删了,重开必须还有一份
+            // 扩展到点就把 token 文件读走并删掉:一发现"没在播"必须立刻补写。
+            // 以前只在 tick % 100(300 秒)补,于是"按停→从系统选择器重开"这段窗口里必哑(配置缺失)。
+            if !broadcastAlive { _ = model.prepareBroadcast() }
+            if tick % 100 == 0 { _ = model.prepareBroadcast() }  // 长直播:保持随时有一份未过期的 token
             model.refreshMicMode()
             tick += 1
             if tick % 5 == 0 { await refreshNet() }             // 每 15 秒顺手探一次网络

@@ -116,7 +116,7 @@ enum BroadcastProbe {
             return Status(phase: .stopped, isActive: false, appFrames: 0)
         }
         let failed = current.contains { line in
-            ["连接或发布失败", "配置缺失或无效", "身份不符合", "无法建立", "不支持 ReplayKit", "复制 ReplayKit PCM 失败", "ReplayKit PCM 转换失败"]
+            ["连接或发布失败", "配置缺失或无效", "身份不符合", "无法建立", "不支持 ReplayKit", "复制 ReplayKit PCM 失败", "ReplayKit PCM 转换失败", "LiveKit 连接断开"]
                 .contains { line.contains($0) }
         }
         var frames = 0
