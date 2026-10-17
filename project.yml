@@ -55,6 +55,11 @@ targets:
         CURRENT_PROJECT_VERSION: "49"
         SWIFT_VERSION: "5.0"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        # 探针分支:扩展链接了 LiveKit,而 LiveKit 的动态框架(RTC/UniFFI)只嵌在主 App 的 Frameworks/ 里。
+        # 扩展进程要在主 App 的 Frameworks 里找它们,标准做法是把 rpath 指到「上两级」。
+        LD_RUNPATH_SEARCH_PATHS:
+          - $(inherited)
+          - "@executable_path/../../Frameworks"
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: NO
         # App Group:主 App 与扩展共享容器(探针日志走这里读回)
