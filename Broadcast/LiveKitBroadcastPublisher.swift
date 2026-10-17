@@ -105,9 +105,8 @@ final class LiveKitBroadcastPublisher: NSObject, RoomDelegate {
     }
 
     private func connect(_ configuration: Configuration) async {
-        let room = Room()
-        room.add(delegate: self)
-        let newRoom = room
+        let newRoom = Room()
+        newRoom.add(delegate: self)
         do {
             try await newRoom.connect(url: configuration.url, token: configuration.token)
             try AudioManager.shared.setManualRenderingMode(true)
