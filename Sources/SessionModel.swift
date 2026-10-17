@@ -5,6 +5,7 @@ import Foundation
 struct TranscriptLine: Identifiable {
     let id = UUID()
     let who: String
+    let source: String
     let text: String
     /// 这句话开始前,同一路音频静了多久(秒)。nil = 服务端没测出来(刚重连的第一句)
     var gap: Double? = nil
@@ -18,6 +19,7 @@ final class SessionModel: ObservableObject {
     @Published var lines: [TranscriptLine] = []
     @Published var partial = ""
     @Published var partialWho = ""
+    @Published var partialSource = ""
     @Published var isRecording = false
     /// 当前麦克风模式(只读 —— iOS 不给 App 设置接口;界面只用来看「是不是宽谱」)
     @Published var micModeText = "读取中"
@@ -86,7 +88,7 @@ final class SessionModel: ObservableObject {
     func resetToDefaults() {
         cfg = LiveKitConfig(url: LiveKitConfig.defaultURL, apiKey: LiveKitConfig.defaultKey,
                             apiSecret: LiveKitConfig.defaultSecret,
-                            identity: LiveKitConfig.defaultIdentity)
+                            device: LiveKitConfig.defaultDevice)
         cfg.save()
         objectWillChange.send()
     }
@@ -123,14 +125,17 @@ final class SessionModel: ObservableObject {
             case "final":
                 self.serverSeconds = audioS          // 「收」= 家里已识别的音频秒数
                 if !text.isEmpty {
-                    self.lines.append(TranscriptLine(who: who, text: text, gap: gap, ts: ts))
+                    self.lines.append(TranscriptLine(who: who, source: raw["source"] as? String ?? "",
+                                                     text: text, gap: gap, ts: ts))
                 }
                 self.partial = ""
                 self.partialWho = ""
+                self.partialSource = ""
             default:
                 self.serverSeconds = audioS
                 self.partial = text
                 self.partialWho = who
+                self.partialSource = raw["source"] as? String ?? ""
             }
         }
         // 从 Bundle 读真实版本(以前写死成 v0.2.0(build 11),截图里会误导人)

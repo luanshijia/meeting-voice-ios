@@ -15,7 +15,7 @@ import Foundation
 final class IngestSender {
 
     /// 家里 TLS 代理上的入口(7443 已放行、证书手机已信任,所以不新增端口、不改防火墙)
-    private let url = URL(string: "https://100.64.0.2:7443/ingest")!
+    private let url: URL
     private let log: (String) -> Void
     private let session: URLSession
 
@@ -53,6 +53,23 @@ final class IngestSender {
 
     init(log: @escaping (String) -> Void) {
         self.log = log
+        let groups = ["group.com.luanshijia.voicememo", "group.com.luanshijia.voicememo.458RP2552K"]
+        var device: String?
+        for group in groups {
+            guard let dir = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group) else {
+                continue
+            }
+            device = try? String(contentsOf: dir.appendingPathComponent("device.txt"), encoding: .utf8)
+            if device != nil { break }
+        }
+        let cleanDevice = device?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let chosenDevice = (cleanDevice?.isEmpty == false) ? cleanDevice! : "luan-iphone"
+        if cleanDevice?.isEmpty != false {
+            log("WARNING[device] App Group device.txt 缺失，使用默认设备名 luan-iphone")
+        }
+        var components = URLComponents(string: "https://100.64.0.2:7443/ingest")!
+        components.queryItems = [URLQueryItem(name: "source", value: "\(chosenDevice)-replaykit")]
+        self.url = components.url!
         let cfg = URLSessionConfiguration.ephemeral
         cfg.timeoutIntervalForRequest = 20
         cfg.httpMaximumConnectionsPerHost = 1     // 串行:到达顺序 = 录音顺序

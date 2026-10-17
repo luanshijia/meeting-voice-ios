@@ -230,7 +230,7 @@ struct ContentView: View {
     private var partialPanel: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                paragraph(who: displayWho(model.partialWho), text: model.partial, color: .blue)
+                paragraph(who: displayWho(model.partialWho, source: model.partialSource), text: model.partial, color: .blue)
                     .id("partial")
                     .padding(.vertical, 4)
             }
@@ -355,7 +355,8 @@ struct ContentView: View {
         var rows: [DisplayRow] = []
         var prevWho = ""
         for (idx, line) in model.lines.enumerated() {
-            let sameSpeaker = (line.who == prevWho)
+            let speakerKey = "\(line.source)|\(line.who)"
+            let sameSpeaker = (speakerKey == prevWho)
             if sameSpeaker, !rows.isEmpty {
                 // 同一人:接着上一段往后写;中间停顿 ≥2.4 秒就夹一个 ~(不换行)
                 if let gap = line.gap, gap >= Self.gapThreshold {
@@ -364,9 +365,10 @@ struct ContentView: View {
                 rows[rows.count - 1].text += line.text
             } else {
                 // 换人:起新的一段,并显示说话人
-                rows.append(DisplayRow(id: "line-\(idx)", who: displayWho(line.who), text: line.text))
+                rows.append(DisplayRow(id: "line-\(idx)",
+                                       who: displayWho(line.who, source: line.source), text: line.text))
             }
-            prevWho = line.who
+            prevWho = speakerKey
         }
         return rows
     }
@@ -374,8 +376,11 @@ struct ContentView: View {
     /// 身份标签(用户口径 2026-10-15 晚:**自己那一路不再显示任何标签** ——
     /// 以前显示「我」或机器身份,没有实际用途和意义,已去掉)。
     /// 「对方」保留:线上会议时它是唯一能区分两个人的东西,去掉就分不清谁说的。
-    private func displayWho(_ who: String) -> String {
-        who == model.identity ? "" : who
+    private func displayWho(_ who: String, source: String) -> String {
+        if source == model.identity { return "" }
+        if source.hasSuffix("-livekit") { return "现场·\(who)" }
+        if source.hasSuffix("-replaykit") { return "在线·\(who)" }
+        return source.isEmpty ? who : "\(source)·\(who)"
     }
 
     /// 停顿记号(用户口径 2026-10-15:三个 ~~~ 改成**一个半角 ~**):超过 30 秒带上时长。

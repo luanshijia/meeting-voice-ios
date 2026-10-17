@@ -13,6 +13,11 @@ struct VoiceMemoApp: App {
         AudioManager.shared.audioSession.isAutomaticDeactivationEnabled = false
         CrashLog.readPreviousRun()   // 先读上一轮留下的崩溃痕迹(必须在 install() 清空文件之前)
         CrashLog.install()           // 再装崩溃处理器
+        let device = LiveKitConfig.load().device
+        if let group = BroadcastProbe.containerURL() {
+            try? (device + "\n").write(to: group.appendingPathComponent("device.txt"),
+                                        atomically: true, encoding: .utf8)
+        }
     }
 
     var body: some Scene {
