@@ -124,7 +124,9 @@ enum BroadcastProbe {
         let heartbeatAge = formatter.date(from: timestamp).map { Date().timeIntervalSince($0) } ?? .infinity
         let stale = !paused && heartbeatAge > 15
         let phase: Phase = failed || stale ? .error : (connected && sentAudio && frames > 0 && !paused ? .receiving : .waiting)
-        return Status(phase: phase, isActive: true, appFrames: frames)
+        // isActive 必须由 phase 推导:stale/failed 时主 App 要重新补写广播 token,并把按钮显示成未开播。
+        // 以前恒为 true,日志里残留一条"扩展启动"就会让主 App 永远不再补写 token,下一次开播直接"配置缺失"。
+        return Status(phase: phase, isActive: phase != .error, appFrames: frames)
     }
 
     /// 整份探针日志(设置页「复制排错信息」用),带上限免得把大文件全读进内存
