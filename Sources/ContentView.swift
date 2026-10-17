@@ -19,7 +19,8 @@ struct ContentView: View {
     // 顶部按钮状态
     @State private var netOK: Bool? = nil            // nil = 还没测过
     @State private var broadcastAlive = false        // 扩展写过「=== 扩展启动」且没写「结束」
-    @State private var broadcastAppFrames = 0        // 扩展记下的系统声音采样帧数
+    @State private var broadcastPhase: BroadcastProbe.Phase = .stopped
+    @State private var followsLatestFinal = true
 
     var body: some View {
         // 底部那一行(未连接 / 网络 断 / 麦克风 … / 录 收 句)改成**真正贴屏幕底边**:
@@ -27,7 +28,7 @@ struct ContentView: View {
         // 现在整块允许下沉(home 指示条所在那条带),只留 12 点内边距避开指示条本身。
         ZStack(alignment: .bottom) {
             VStack(spacing: 6) {
-                buttonRow                   // 顶部只剩四个按钮(状态行搬到屏幕最下方)
+                buttonRow                   // 顶部五个按钮(状态行搬到屏幕最下方)
                 transcript                  // 提要面板已删 → 字幕铺满整屏
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -41,11 +42,20 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) { SettingsSheet(model: model) }
         .task { await refreshLoop() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await refreshExt(); await refreshNet() } }
+            if phase == .active {
+                Task {
+                    await refreshExt()
+                    if !broadcastAlive { _ = model.prepareBroadcast() }
+                    await refreshNet()
+                }
+            }
+        }
+        .onChange(of: model.isRecording) { _, active in
+            if active { followsLatestFinal = true }
         }
     }
 
-    // MARK: - 顶部四个按钮(一行,等宽)
+    // MARK: - 顶部五个按钮(一行)
 
     private var buttonRow: some View {
         HStack(spacing: 6) {
@@ -87,38 +97,29 @@ struct ContentView: View {
         }
     }
 
-    /// 扩展:点它调出系统直播选择器。
-    /// 三态颜色:灰=未开播;蓝=已开播但未收到系统声;红=已收到系统声。
+    /// 扩展:直接使用 iOS 原生直播选择器；状态只用旁边的小圆点表达。
     private var extButton: some View {
-        ZStack {
-            // 系统组件藏到最底层(1% 透明):它的外观不能改,只负责被下面那个按钮程序触发
+        HStack(spacing: 2) {
             BroadcastPickerView()
-                .frame(width: 44, height: 44)
-                .opacity(0.01)
-            Button {
-                if model.prepareBroadcast() {
-                    BroadcastPickerTrigger.open()
-                }
-            } label: {
-                buttonLabel(icon: "dot.radiowaves.left.and.right", title: extTitle,
-                            fg: broadcastAlive ? .white : .primary)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6).fill(extFill)
-                    )
-            }
-            .buttonStyle(.plain)                      // 整块底色都算点击区
+                .frame(width: 24, height: 24)
+                .accessibilityLabel("开始或停止系统声音直播")
+            Circle()
+                .fill(extStatusColor)
+                .frame(width: 7, height: 7)
+                .overlay(Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 1))
+                .allowsHitTesting(false)
         }
+        .frame(maxWidth: .infinity)
+        .frame(height: 24)
     }
 
-    /// 整块底色随状态变(用户要求:不要只有边框变色)
-    private var extFill: Color {
-        if !broadcastAlive { return Color.secondary.opacity(0.25) }  // 灰:确定没开播
-        return broadcastAppFrames > 0 ? Color.red : Color.blue       // 红:扩展已收到系统声
-    }
-
-    private var extTitle: String {
-        if !broadcastAlive { return "扩展" }
-        return broadcastAppFrames > 0 ? "扩展·收" : "扩展·等"
+    private var extStatusColor: Color {
+        switch broadcastPhase {
+        case .stopped: return .secondary
+        case .waiting: return .blue
+        case .receiving: return .green
+        case .error: return .red
+        }
     }
 
     /// 设置:配色统一成「宽谱」「开启」那档实心深蓝(用户口径 2026-10-15 晚;以前是浅蓝 0.18)。
@@ -231,13 +232,17 @@ struct ContentView: View {
     private var partialPanel: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                paragraph(who: displayWho(model.partialWho, source: model.partialSource), text: model.partial, color: .blue)
-                    .id("partial")
-                    .padding(.vertical, 4)
+                LazyVStack(alignment: .leading, spacing: 4) {
+                    ForEach(model.partials) { item in
+                        paragraph(who: displayWho(item.who, source: item.source), text: item.text, color: .blue)
+                            .id(item.id)
+                    }
+                }
+                .padding(.vertical, 4)
             }
-            .onChange(of: model.partial) { _, newValue in
-                guard !newValue.isEmpty else { return }
-                proxy.scrollTo("partial", anchor: .bottom)
+            .onChange(of: model.partials.map(\.text)) { _, _ in
+                guard let last = model.partials.last else { return }
+                proxy.scrollTo(last.id, anchor: .bottom)
             }
         }
     }
@@ -245,18 +250,37 @@ struct ContentView: View {
     /// 第二遍:定稿(带 ~ 停顿记号)自己的滚动区
     private var finalPanel: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    ForEach(displayRows) { row in
-                        paragraph(who: row.who, text: row.text, color: .primary)
-                            .id(row.id)
+            ZStack(alignment: .bottomTrailing) {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        ForEach(displayRows) { row in
+                            paragraph(who: row.who, text: row.text, color: .primary)
+                                .id(row.id)
+                        }
                     }
+                    .padding(.vertical, 4)
                 }
-                .padding(.vertical, 4)
-            }
-            .onChange(of: model.lines.count) { _, _ in
-                guard let last = displayRows.last else { return }
-                proxy.scrollTo(last.id, anchor: .bottom)
+                .simultaneousGesture(DragGesture(minimumDistance: 5).onChanged { _ in
+                    followsLatestFinal = false
+                })
+                .onChange(of: model.lines.count) { _, _ in
+                    guard followsLatestFinal, let last = displayRows.last else { return }
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+                if !followsLatestFinal, let last = displayRows.last {
+                    Button {
+                        followsLatestFinal = true
+                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                    } label: {
+                        Image(systemName: "arrow.down.to.line")
+                            .font(.system(size: 12, weight: .semibold))
+                            .frame(width: 28, height: 28)
+                            .background(.regularMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("回到最新字幕")
+                    .padding(6)
+                }
             }
         }
     }
@@ -411,8 +435,9 @@ struct ContentView: View {
     // MARK: - 刷新
 
     private func refreshExt() async {
-        broadcastAlive = BroadcastProbe.isBroadcasting()
-        broadcastAppFrames = BroadcastProbe.appFramesSeen()
+        let status = BroadcastProbe.status()
+        broadcastAlive = status.isActive
+        broadcastPhase = status.phase
     }
 
     private func refreshNet() async {
@@ -422,12 +447,14 @@ struct ContentView: View {
 
     private func refreshLoop() async {
         await refreshExt()
+        if !broadcastAlive { _ = model.prepareBroadcast() }
         await refreshNet()
         model.refreshMicMode()
         var tick = 0
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 3_000_000_000)   // 每 3 秒看一次扩展状态 + 麦克风模式
             await refreshExt()
+            if tick % 100 == 0 && !broadcastAlive { _ = model.prepareBroadcast() } // 5 分钟刷新一次 15 分钟 token
             model.refreshMicMode()
             tick += 1
             if tick % 5 == 0 { await refreshNet() }             // 每 15 秒顺手探一次网络

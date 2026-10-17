@@ -13,13 +13,19 @@ struct TranscriptLine: Identifiable {
     var ts: Double = 0
 }
 
+struct TranscriptPartial: Identifiable {
+    var id: String { source.isEmpty ? "unknown-\(who)" : source }
+    var who: String
+    var source: String
+    var text: String
+}
+
 @MainActor
 final class SessionModel: ObservableObject {
     @Published var status = "未连接"
     @Published var lines: [TranscriptLine] = []
-    @Published var partial = ""
-    @Published var partialWho = ""
-    @Published var partialSource = ""
+    /// 每个音源各自保留第一遍流式字幕，避免一路定稿清空另一路内容。
+    @Published var partials: [TranscriptPartial] = []
     @Published var isRecording = false
     /// 当前麦克风模式(只读 —— iOS 不给 App 设置接口;界面只用来看「是不是宽谱」)
     @Published var micModeText = "读取中"
@@ -140,20 +146,17 @@ final class SessionModel: ObservableObject {
                     self.lines.append(TranscriptLine(who: who, source: raw["source"] as? String ?? "",
                                                      text: text, gap: gap, ts: ts))
                 }
-                self.partial = ""
-                self.partialWho = ""
-                self.partialSource = ""
+                self.clearPartial(source: raw["source"] as? String ?? "", who: who)
             default:
                 self.serverSeconds = audioS
-                self.partial = text
-                self.partialWho = who
-                self.partialSource = raw["source"] as? String ?? ""
+                self.updatePartial(source: raw["source"] as? String ?? "", who: who, text: text)
             }
         }
         // 从 Bundle 读真实版本(以前写死成 v0.2.0(build 11),截图里会误导人)
         let ver = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
         note("App 启动,v\(ver)(build \(build), LiveKit)")
+        _ = prepareBroadcast() // 预先刷新短期 token，保证系统原生选择器可直接启动扩展
     }
 
     func toggle() { isRecording ? stop() : start() }
@@ -171,8 +174,7 @@ final class SessionModel: ObservableObject {
 
     private func start() {
         lines = []
-        partial = ""
-        partialWho = ""
+        partials = []
         recordedSeconds = 0
         serverSeconds = 0
         summaries = []                      // 新一场:提要列表与状态区都从零开始
@@ -213,6 +215,26 @@ final class SessionModel: ObservableObject {
     }
 
     private func stopTimer() { timer?.invalidate(); timer = nil }
+
+    private func updatePartial(source: String, who: String, text: String) {
+        let key = source.isEmpty ? "unknown-\(who)" : source
+        if text.isEmpty {
+            partials.removeAll { $0.id == key }
+            return
+        }
+        if let index = partials.firstIndex(where: { $0.id == key }) {
+            partials[index].who = who
+            partials[index].source = source
+            partials[index].text = text
+        } else {
+            partials.append(TranscriptPartial(who: who, source: source, text: text))
+        }
+    }
+
+    private func clearPartial(source: String, who: String) {
+        let key = source.isEmpty ? "unknown-\(who)" : source
+        partials.removeAll { $0.id == key }
+    }
 
     private static func stamp() -> String {
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f.string(from: Date())

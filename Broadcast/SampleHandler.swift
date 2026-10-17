@@ -8,6 +8,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
     private var publisher: LiveKitBroadcastPublisher?
     private var appFrames = 0
     private var callbacks = 0
+    private var micCallbacks = 0
     private var sampleRate = 0.0
     private var lastStatus = Date.distantPast
 
@@ -34,6 +35,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         appFrames = 0
         callbacks = 0
+        micCallbacks = 0
         sampleRate = 0
         lastStatus = .distantPast
         log("=== 扩展启动 ===")
@@ -47,11 +49,16 @@ final class SampleHandler: RPBroadcastSampleHandler {
     override func broadcastFinished() {
         publisher?.stop()
         publisher = nil
-        log("=== 扩展结束; audioApp 回调=\(callbacks) 样本=\(appFrames) 时长≈\(seconds())秒 ===")
+        log("=== 扩展结束; audioApp 回调=\(callbacks) audioMic 回调=\(micCallbacks) 样本=\(appFrames) 时长≈\(seconds())秒 ===")
     }
 
     override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, with type: RPSampleBufferType) {
-        guard type == .audioApp else { return }       // 不发送 audioMic，避免与主 App 麦克风重复
+        if type == .audioMic {
+            // 仅计数用于核对系统麦克风开关是否生效；绝不复制或发布，主 App 是唯一麦克风轨。
+            micCallbacks += 1
+            return
+        }
+        guard type == .audioApp else { return }
         callbacks += 1
         appFrames += CMSampleBufferGetNumSamples(sampleBuffer)
         if sampleRate == 0,
@@ -64,7 +71,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         let now = Date()
         if now.timeIntervalSince(lastStatus) >= 5 {
             lastStatus = now
-            log("计数 回调 audioApp=\(callbacks) 样本=\(appFrames) 时长≈\(seconds())秒")
+            log("计数 回调 audioApp=\(callbacks) audioMic=\(micCallbacks) 样本=\(appFrames) 时长≈\(seconds())秒")
         }
     }
 

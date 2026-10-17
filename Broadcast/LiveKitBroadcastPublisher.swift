@@ -89,7 +89,11 @@ final class LiveKitBroadcastPublisher {
         do {
             try await newRoom.connect(url: configuration.url, token: configuration.token)
             try AudioManager.shared.setManualRenderingMode(true)
+            // Keep the published track as the ReplayKit appAudio path only. LiveKit's mixer
+            // otherwise combines its device microphone with the injected appAudio buffers.
+            AudioManager.shared.mixer.micVolume = 0
             try await newRoom.localParticipant.setMicrophone(enabled: true)
+            AudioManager.shared.mixer.micVolume = 0
 
             lock.lock()
             let shouldStop = stopped || Task.isCancelled
@@ -190,6 +194,6 @@ final class LiveKitBroadcastPublisher {
 
         AudioManager.shared.mixer.capture(appAudio: output)
         chunks += 1
-        if chunks % 250 == 0 { log("LiveKit 已送入系统声音 \(chunks) 块") }
+        if chunks == 1 || chunks % 250 == 0 { log("LiveKit 已送入系统声音 \(chunks) 块") }
     }
 }

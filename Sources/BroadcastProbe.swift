@@ -74,25 +74,47 @@ enum BroadcastProbe {
     /// (音频静音超过 30 秒后扩展会按设计关掉那条传输连接,此时扩展仍在直播),
     /// 超时会把正在直播的静音时段误判成已停止 —— 用户实测反馈"没必要",故去掉。
     static func isBroadcasting() -> Bool {
-        guard let url = containerURL()?.appendingPathComponent(fileName) else { return false }
-        var alive = false
-        for line in tailText(url: url, bytes: 8192).split(separator: "\n") {
-            if line.contains("=== 扩展启动") { alive = true }
-            else if line.contains("=== 扩展结束") { alive = false }
-        }
-        return alive
+        status().isActive
     }
 
     /// 扩展最近一次记下的系统声音采样帧数(>0 = ReplayKit 已交付 audioApp)。
     static func appFramesSeen() -> Int {
-        guard let url = containerURL()?.appendingPathComponent(fileName) else { return 0 }
-        var last = 0
-        for line in tailText(url: url, bytes: 16384).split(separator: "\n") where line.contains("计数 回调") {
+        status().appFrames
+    }
+
+    enum Phase { case stopped, waiting, receiving, error }
+    struct Status { let phase: Phase; let isActive: Bool; let appFrames: Int }
+
+    /// 仅解读最近一次广播生命周期，避免旧日志计数把新一轮状态染绿。
+    /// 必须看到 LiveKit 已连接且本轮 audioApp 帧数大于零，才报告“正在收声”。
+    static func status() -> Status {
+        guard let url = containerURL()?.appendingPathComponent(fileName) else {
+            return Status(phase: .stopped, isActive: false, appFrames: 0)
+        }
+        let lines = tailText(url: url, bytes: 512_000).split(separator: "\n").map(String.init)
+        guard let start = lines.lastIndex(where: { $0.contains("=== 扩展启动") }) else {
+            return Status(phase: .stopped, isActive: false, appFrames: 0)
+        }
+        let current = lines[start...]
+        guard !current.contains(where: { $0.contains("=== 扩展结束") }) else {
+            return Status(phase: .stopped, isActive: false, appFrames: 0)
+        }
+        let failed = current.contains { line in
+            ["连接或发布失败", "配置缺失或无效", "身份不符合", "无法建立", "不支持 ReplayKit", "复制 ReplayKit PCM 失败", "ReplayKit PCM 转换失败"]
+                .contains { line.contains($0) }
+        }
+        var frames = 0
+        for line in current where line.contains("计数 回调") {
             guard let marker = line.range(of: "audioApp=") else { continue }
             let digits = line[marker.upperBound...].prefix { $0.isNumber }
-            if let value = Int(digits) { last = value }
+            if let value = Int(digits) { frames = value }
         }
-        return last
+        let connected = current.contains { $0.contains("LiveKit 已连接并发布音频轨") }
+        let sentAudio = current.contains { $0.contains("LiveKit 已送入系统声音") }
+        let paused = current.last(where: { $0.contains("扩展暂停") || $0.contains("扩展恢复") })?
+            .contains("扩展暂停") ?? false
+        let phase: Phase = failed ? .error : (connected && sentAudio && frames > 0 && !paused ? .receiving : .waiting)
+        return Status(phase: phase, isActive: true, appFrames: frames)
     }
 
     /// 整份探针日志(设置页「复制排错信息」用),带上限免得把大文件全读进内存
@@ -122,27 +144,9 @@ struct BroadcastPickerView: UIViewRepresentable {
         let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
         picker.preferredExtension = BroadcastProbe.extensionBundleID
         picker.showsMicrophoneButton = true
-        BroadcastPickerTrigger.picker = picker       // 交给 BroadcastPickerTrigger 程序触发
         return picker
     }
     func updateUIView(_ uiView: RPSystemBroadcastPickerView, context: Context) {}
-}
-
-/// 程序化打开系统直播选择器。
-/// 为什么要绕这一下:系统只给 RPSystemBroadcastPickerView 这个「自带外观的按钮」,外观不可改。
-/// 早先的做法是把它透明地盖在自己画的按钮上 —— build 22 真机实测「点不动」。
-/// 现在改成:它藏在最底层(1% 透明),我们自己的按钮调用 open() 去点它内部真正的 UIButton。
-enum BroadcastPickerTrigger {
-    static weak var picker: RPSystemBroadcastPickerView?
-    static func open() {
-        guard let picker else { return }
-        for sub in picker.subviews {
-            if let button = sub as? UIButton {
-                button.sendActions(for: .touchUpInside)
-                return
-            }
-        }
-    }
 }
 
 struct AppGroupRow: View {
