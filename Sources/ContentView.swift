@@ -33,7 +33,7 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(.horizontal, 12)
-            .padding(.top, -10)      // 顶到状态栏下方只剩 ~14 点空隙:上面没有我们的东西,别浪费屏幕
+            .padding(.top, -6)       // 顶排按钮比之前下移 4 点,留出少量呼吸空间
             .padding(.bottom, 26)           // 给贴底的底栏让出高度,别盖住字幕
 
             bottomBar
@@ -97,28 +97,35 @@ struct ContentView: View {
         }
     }
 
-    /// 扩展:直接使用 iOS 原生直播选择器；状态只用旁边的小圆点表达。
+    /// 扩展区:左侧独立状态圆点,右侧 iOS 原生直播选择器；两个圆形控件等大。
     private var extButton: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(extStatusColor)
+                .frame(width: 24, height: 24)
+                .accessibilityLabel(extStatusDescription)
             BroadcastPickerView()
                 .frame(width: 24, height: 24)
                 .accessibilityLabel("开始或停止系统声音直播")
-            Circle()
-                .fill(extStatusColor)
-                .frame(width: 7, height: 7)
-                .overlay(Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 1))
-                .allowsHitTesting(false)
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 24)
+        .frame(maxWidth: .infinity, minHeight: 24, maxHeight: 24)
     }
 
     private var extStatusColor: Color {
         switch broadcastPhase {
         case .stopped: return .secondary
         case .waiting: return .blue
-        case .receiving: return .green
-        case .error: return .red
+        case .receiving: return .red
+        case .error: return .orange
+        }
+    }
+
+    private var extStatusDescription: String {
+        switch broadcastPhase {
+        case .stopped: return "直播未启动"
+        case .waiting: return "直播已启动,正在连接或等待系统声音"
+        case .receiving: return "正在接收并发送系统声音"
+        case .error: return "直播异常或系统声音中断"
         }
     }
 
@@ -322,7 +329,7 @@ struct ContentView: View {
                                     .font(.caption2).foregroundStyle(.secondary)
                                     .frame(width: 34, alignment: .leading)
                                 Text(item.text)
-                                    .font(.callout)
+                                    .font(.system(size: 15))
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             .id(item.id)
@@ -402,9 +409,9 @@ struct ContentView: View {
     /// 以前显示「我」或机器身份,没有实际用途和意义,已去掉)。
     /// 「对方」保留:线上会议时它是唯一能区分两个人的东西,去掉就分不清谁说的。
     private func displayWho(_ who: String, source: String) -> String {
-        if source == model.identity { return "" }
+        if source == model.identity { return "本地1" }
         if source.hasSuffix("-livekit") { return "现场·\(who)" }
-        if source.hasSuffix("-replaykit") { return "在线·\(who)" }
+        if source.hasSuffix("-replaykit") { return "在线1" }
         return source.isEmpty ? who : "\(source)·\(who)"
     }
 
