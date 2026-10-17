@@ -9,6 +9,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
     private var appFrames = 0
     private var callbacks = 0
     private var micCallbacks = 0
+    private var videoCallbacks = 0
     private var sampleRate = 0.0
     private var lastStatus = Date.distantPast
 
@@ -36,6 +37,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         appFrames = 0
         callbacks = 0
         micCallbacks = 0
+        videoCallbacks = 0
         sampleRate = 0
         lastStatus = .distantPast
         log("=== 扩展启动 ===")
@@ -58,20 +60,26 @@ final class SampleHandler: RPBroadcastSampleHandler {
             micCallbacks += 1
             return
         }
-        guard type == .audioApp else { return }
-        callbacks += 1
-        appFrames += CMSampleBufferGetNumSamples(sampleBuffer)
-        if sampleRate == 0,
-           let description = CMSampleBufferGetFormatDescription(sampleBuffer),
-           let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(description) {
-            sampleRate = asbd.pointee.mSampleRate
+        if type == .video {
+            // Screen frames are not retained or forwarded; they only provide a broadcast-process heartbeat.
+            videoCallbacks += 1
+        } else if type == .audioApp {
+            callbacks += 1
+            appFrames += CMSampleBufferGetNumSamples(sampleBuffer)
+            if sampleRate == 0,
+               let description = CMSampleBufferGetFormatDescription(sampleBuffer),
+               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(description) {
+                sampleRate = asbd.pointee.mSampleRate
+            }
+            publisher?.append(sampleBuffer)
+        } else {
+            return
         }
-        publisher?.append(sampleBuffer)
 
         let now = Date()
         if now.timeIntervalSince(lastStatus) >= 5 {
             lastStatus = now
-            log("计数 回调 audioApp=\(callbacks) audioMic=\(micCallbacks) 样本=\(appFrames) 时长≈\(seconds())秒")
+            log("计数 回调 video=\(videoCallbacks) audioApp=\(callbacks) audioMic=\(micCallbacks) 样本=\(appFrames) 时长≈\(seconds())秒")
         }
     }
 

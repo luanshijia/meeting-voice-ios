@@ -113,7 +113,17 @@ enum BroadcastProbe {
         let sentAudio = current.contains { $0.contains("LiveKit 已送入系统声音") }
         let paused = current.last(where: { $0.contains("扩展暂停") || $0.contains("扩展恢复") })?
             .contains("扩展暂停") ?? false
-        let phase: Phase = failed ? .error : (connected && sentAudio && frames > 0 && !paused ? .receiving : .waiting)
+        let heartbeatIndex = current.lastIndex(where: { $0.contains("计数 回调") })
+        let lifecycleIndex = current.lastIndex(where: {
+            $0.contains("=== 扩展启动") || $0.contains("扩展暂停") || $0.contains("扩展恢复")
+        })
+        let referenceIndex = max(heartbeatIndex ?? start, lifecycleIndex ?? start)
+        let referenceLine = current[referenceIndex]
+        let timestamp = referenceLine.split(separator: " ", maxSplits: 1).first.map(String.init) ?? ""
+        let formatter = ISO8601DateFormatter()
+        let heartbeatAge = formatter.date(from: timestamp).map { Date().timeIntervalSince($0) } ?? .infinity
+        let stale = !paused && heartbeatAge > 15
+        let phase: Phase = failed || stale ? .error : (connected && sentAudio && frames > 0 && !paused ? .receiving : .waiting)
         return Status(phase: phase, isActive: true, appFrames: frames)
     }
 
