@@ -54,17 +54,13 @@ final class ProbeRoom {
     // MARK: - 连接 + 发轨
 
     private func connectAndPublish() async {
-        guard let url = URL(string: urlString) else {
-            log("probe 失败:URL 无效")
-            return
-        }
         guard let token = makeToken() else {
             log("probe 失败:token 造不出来")
             return
         }
         do {
             let r = Room()
-            try await r.connect(url: url, token: token)
+            try await r.connect(url: urlString, token: token)
             log("probe 已连上房间")
 
             // 手动渲染:不访问任何音频设备（扩展里本来也没有可用的麦克风上下文）。
