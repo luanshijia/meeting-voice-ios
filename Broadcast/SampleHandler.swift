@@ -39,6 +39,9 @@ final class SampleHandler: RPBroadcastSampleHandler {
     private var ticker: DispatchSourceTimer?
     /// 5A:把「对方的声音」发回家里的发送器(见 IngestSender.swift)
     private var ingest: IngestSender?
+    /// 丙B-3 探针:在同一个扩展进程里再跑一套 LiveKit,自己连房发一路音频(见 ProbeRoom.swift)。
+    /// 与 5A 并存是有意的 —— 探针失败不影响现有链路,探针成功则说明这条路能取代 5A。
+    private var probe: ProbeRoom?
 
     private var counts: [String: Int] = ["audioApp": 0, "audioMic": 0, "video": 0]  // 回调次数
     private var frames: [String: Int] = ["audioApp": 0, "audioMic": 0]             // 真实采样数
@@ -126,6 +129,9 @@ final class SampleHandler: RPBroadcastSampleHandler {
         // 5A:「对方的声音」走这条路回家(麦克风那一路由主 App 的 LiveKit 麦克风轨负责,两条互不干扰)
         ingest = IngestSender { [weak self] line in self?.log(line) }
         log("5A 已就绪:按 16k 单声道把对方的声音发回家里")
+        // 丙B-3 探针:同一个进程里再连一套 LiveKit(房间 probe-ext),把「扩展能不能自己发一路」这件事验掉
+        probe = ProbeRoom { [weak self] line in self?.log(line) }
+        probe?.start()
         report("start")                                  // 立刻发一次:哪怕零音频,也能证明"扩展活着 + 能连上家里"
         let t = DispatchSource.makeTimerSource(queue: .global())
         t.schedule(deadline: .now() + 3, repeating: 3)
@@ -146,6 +152,8 @@ final class SampleHandler: RPBroadcastSampleHandler {
         ingest?.close()
         log("5A 收尾: \(ingest?.status ?? "-")")
         ingest = nil
+        probe?.stop()
+        probe = nil
         report("finish")
         ticker?.cancel()
         ticker = nil
