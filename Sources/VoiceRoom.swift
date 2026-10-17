@@ -7,9 +7,9 @@ import LiveKit
 final class VoiceRoom: NSObject {
     private var room: Room?
 
-    /// 主动断开标记:我们自己调 disconnect 时 SDK 也会回调 didDisconnectWithError,
-    /// 以前那条回调会把状态从"已停止"改成"连接已断开"(UI 上看着像异常掉线)。
-    private var intentionalDisconnect = false
+    /// 主动断开的目标实例:自己断的那条连接,SDK 也会回调 didDisconnect·didFailToConnect,
+    /// 以前那条回调会把状态从"已停止"改成"连接已断开"。按实例记,避免标志残留给下一次断开。
+    private var intentionalTarget: ObjectIdentifier?
 
     var onState: ((String) -> Void)?
     var onNote: ((String) -> Void)?
@@ -60,7 +60,7 @@ final class VoiceRoom: NSObject {
     /// 断开指定这一条连接。只清理自己:目标不是当前 `room` 时不动 `self.room`。
     /// 为什么必须传实例:旧连接任务迟到完成时若执行"断开当前房间",会把后来新建的会话断掉。
     func disconnect(_ target: Room) async {
-        intentionalDisconnect = true
+        intentionalTarget = ObjectIdentifier(target)
         _ = try? await target.localParticipant.setMicrophone(enabled: false)
         await target.disconnect()
         if room === target { room = nil }
@@ -102,7 +102,7 @@ extension VoiceRoom: RoomDelegate {
     nonisolated func room(_ room: Room, didFailToConnectWithError error: LiveKitError?) {
         Task { @MainActor [weak self] in
             guard let self, self.room === room else { return }
-            if self.consumeIntentionalDisconnect() { return }      // 自己停的,不算连接失败
+            if self.consumeIntentionalDisconnect(room) { return }      // 自己停的,不算连接失败
             self.onEnded?("连接失败:" + (error?.description ?? "未知"))
         }
     }
@@ -110,7 +110,7 @@ extension VoiceRoom: RoomDelegate {
     nonisolated func room(_ room: Room, didDisconnectWithError error: LiveKitError?) {
         Task { @MainActor [weak self] in
             guard let self, self.room === room else { return }
-            if self.consumeIntentionalDisconnect() {               // 自己停的:只更新状态,别覆盖"已停止"
+            if self.consumeIntentionalDisconnect(room) {               // 自己停的:只更新状态,别覆盖"已停止"
                 self.onState?("已断开(主动停止)")
                 return
             }
@@ -118,10 +118,11 @@ extension VoiceRoom: RoomDelegate {
         }
     }
 
-    /// 取走"主动断开"标记(只对最近一次断开有效)。
-    private func consumeIntentionalDisconnect() -> Bool {
-        defer { intentionalDisconnect = false }
-        return intentionalDisconnect
+    /// 取走"主动断开"标记:只对同一个 Room 实例有效,不留给下一次断开。
+    private func consumeIntentionalDisconnect(_ target: Room) -> Bool {
+        guard intentionalTarget == ObjectIdentifier(target) else { return false }
+        intentionalTarget = nil
+        return true
     }
 
     private static func describe(_ s: ConnectionState) -> String {

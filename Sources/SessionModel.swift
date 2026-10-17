@@ -273,7 +273,10 @@ final class SessionModel: ObservableObject {
         // 重连/换轨后服务端 audio_s 从 0 重计:以前一律 max(),「收」就卡在旧高水位,
         // "落后 >5 秒变红"永远不响。判据:这一路 10 秒没上报=旧值已不可信,允许回退。
         let stale = now.timeIntervalSince(progressSeenAt[key] ?? .distantPast) > 10
-        serverBySource[key] = (seconds < previous && !stale) ? previous : seconds
+        // 同一轨内 audio_s 单调递增:一次回退 >5 秒只可能是换轨/重连。
+        // 只看时间阈值会漏掉"快速重连(<10 秒)"——那时「收」还卡在旧高水位,落后变红永远不响。
+        let rewind = seconds + 5 < previous
+        serverBySource[key] = (seconds < previous && !stale && !rewind) ? previous : seconds
         progressSeenAt[key] = now
         let mic = serverBySource.filter { $0.key.hasSuffix("-livekit") }.values.max()
         serverSeconds = mic ?? serverBySource.values.max() ?? 0
