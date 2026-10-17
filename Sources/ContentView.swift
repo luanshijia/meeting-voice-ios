@@ -99,7 +99,7 @@ struct ContentView: View {
 
     /// 扩展区:iOS 原生直播选择器在前,状态圆点在后；两者作为一组居中且等大。
     private var extButton: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
             BroadcastPickerView()
                 .frame(width: 24, height: 24)
                 .accessibilityLabel("开始或停止系统声音直播")
@@ -109,6 +109,7 @@ struct ContentView: View {
                 .accessibilityLabel(extStatusDescription)
         }
         .frame(maxWidth: .infinity, minHeight: 24, maxHeight: 24)
+        .padding(.horizontal, 4) // 与组内 2 点间距拉开,和两侧按钮形成分组
     }
 
     private var extStatusColor: Color {
